@@ -71,6 +71,7 @@ class SVDModel:
         user_indices: np.ndarray,
         movie_indices: np.ndarray,
         n_factors: int | None = None,
+        clip: bool = True,
     ) -> np.ndarray:
         self._check_fitted()
         user_indices = np.asarray(user_indices, dtype=np.int64)
@@ -90,9 +91,15 @@ class SVDModel:
             + self.user_means[user_indices]
             + self.item_bias[movie_indices]
         )
-        return np.clip(predictions, 1.0, 5.0).astype(np.float32)
+        if clip:
+            predictions = np.clip(predictions, 1.0, 5.0)
+        return predictions.astype(np.float32)
 
-    def predict_all(self, n_factors: int | None = None) -> np.ndarray:
+    def predict_all(
+        self,
+        n_factors: int | None = None,
+        clip: bool = True,
+    ) -> np.ndarray:
         self._check_fitted()
         k = self.n_factors if n_factors is None else int(n_factors)
         if not 1 <= k <= self.n_factors:
@@ -102,4 +109,6 @@ class SVDModel:
         ) @ self.item_factors[:k, :]
         reconstructed += self.user_means[:, None]
         reconstructed += self.item_bias[None, :]
-        return np.clip(reconstructed, 1.0, 5.0).astype(np.float32)
+        if clip:
+            reconstructed = np.clip(reconstructed, 1.0, 5.0)
+        return reconstructed.astype(np.float32)

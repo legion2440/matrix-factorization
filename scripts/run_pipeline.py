@@ -296,7 +296,7 @@ def main() -> None:
         item_bias_regularization=float(svd_best["item_bias_regularization"]),
         random_state=RANDOM_STATE,
     ).fit(final_matrix, final_means)
-    svd_prediction_matrix = final_svd.predict_all()
+    svd_prediction_matrix = final_svd.predict_all(clip=False)
     np.save(reports_dir / "svd_predictions.npy", svd_prediction_matrix.astype(np.float32))
     np.save(reports_dir / "svd_user_means.npy", final_means.astype(np.float32))
     save_json(
@@ -308,6 +308,7 @@ def main() -> None:
             ),
             "random_state": RANDOM_STATE,
             "shape": list(svd_prediction_matrix.shape),
+            "prediction_scale": "raw_unclipped",
         },
     )
 

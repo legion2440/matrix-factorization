@@ -17,7 +17,9 @@ class RecommendationModel(Protocol):
     movies: pd.DataFrame
     known_ratings: pd.DataFrame
 
-    def predict_all_for_user(self, user_id: int) -> np.ndarray: ...
+    def predict_all_for_user(self, user_id: int) -> np.ndarray:
+        """Return raw, unclipped scores used only for ranking."""
+        ...
 
 
 @dataclass
@@ -45,7 +47,7 @@ class PMFRecommendationModel:
     name: str = "PMF"
 
     def predict_all_for_user(self, user_id: int) -> np.ndarray:
-        return self.pmf.predict_user(self.user_to_index[user_id])
+        return self.pmf.predict_user(self.user_to_index[user_id], clip=False)
 
 
 def generate_recommendations(
@@ -60,9 +62,13 @@ def generate_recommendations(
     if user_id not in model.user_to_index:
         raise ValueError(f"Unknown user_id: {user_id}")
 
-    scores = np.asarray(model.predict_all_for_user(user_id), dtype=np.float32)
-    if scores.shape != (len(model.index_to_movie),):
+    ranking_scores = np.asarray(
+        model.predict_all_for_user(user_id), dtype=np.float32
+    )
+    if ranking_scores.shape != (len(model.index_to_movie),):
         raise ValueError("Model returned an invalid score vector")
+    if not np.isfinite(ranking_scores).all():
+        raise ValueError("Model returned non-finite recommendation scores")
     seen = set(
         model.known_ratings.loc[
             model.known_ratings["user_id"].eq(user_id), "movie_id"
@@ -71,7 +77,8 @@ def generate_recommendations(
     candidates = pd.DataFrame(
         {
             "movie_id": model.index_to_movie.astype(np.int32),
-            "predicted_rating": scores,
+            "ranking_score": ranking_scores,
+            "predicted_rating": np.clip(ranking_scores, 1.0, 5.0),
         }
     )
     candidates = candidates.loc[~candidates["movie_id"].isin(seen)]
@@ -82,11 +89,17 @@ def generate_recommendations(
         validate="one_to_one",
     )
     candidates = candidates.sort_values(
-        ["predicted_rating", "movie_id"],
+        ["ranking_score", "movie_id"],
         ascending=[False, True],
         kind="mergesort",
     )
-    columns = ["movie_id", "title", "genres", "predicted_rating"]
+    columns = [
+        "movie_id",
+        "title",
+        "genres",
+        "ranking_score",
+        "predicted_rating",
+    ]
     return candidates.head(int(top_n))[columns].reset_index(drop=True)
 
 
@@ -100,8 +113,18 @@ def compare_recommendations(
     pmf = generate_recommendations(user_id, pmf_model, top_n).copy()
     svd["svd_rank"] = np.arange(1, len(svd) + 1)
     pmf["pmf_rank"] = np.arange(1, len(pmf) + 1)
-    svd = svd.rename(columns={"predicted_rating": "svd_predicted_rating"})
-    pmf = pmf.rename(columns={"predicted_rating": "pmf_predicted_rating"})
+    svd = svd.rename(
+        columns={
+            "ranking_score": "svd_ranking_score",
+            "predicted_rating": "svd_predicted_rating",
+        }
+    )
+    pmf = pmf.rename(
+        columns={
+            "ranking_score": "pmf_ranking_score",
+            "predicted_rating": "pmf_predicted_rating",
+        }
+    )
     comparison = svd.merge(
         pmf,
         on=["movie_id", "title", "genres"],
@@ -113,4 +136,3 @@ def compare_recommendations(
         na_position="last",
         kind="mergesort",
     ).reset_index(drop=True)
-

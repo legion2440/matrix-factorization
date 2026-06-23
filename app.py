@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -123,14 +122,24 @@ def main() -> None:
     with left:
         st.subheader("SVD recommendations")
         st.dataframe(
-            svd_recommendations.style.format({"predicted_rating": "{:.3f}"}),
+            svd_recommendations.style.format(
+                {
+                    "ranking_score": "{:.3f}",
+                    "predicted_rating": "{:.3f}",
+                }
+            ),
             hide_index=True,
             use_container_width=True,
         )
     with right:
         st.subheader("PMF recommendations")
         st.dataframe(
-            pmf_recommendations.style.format({"predicted_rating": "{:.3f}"}),
+            pmf_recommendations.style.format(
+                {
+                    "ranking_score": "{:.3f}",
+                    "predicted_rating": "{:.3f}",
+                }
+            ),
             hide_index=True,
             use_container_width=True,
         )
@@ -142,7 +151,9 @@ def main() -> None:
     st.dataframe(
         comparison.style.format(
             {
+                "svd_ranking_score": "{:.3f}",
                 "svd_predicted_rating": "{:.3f}",
+                "pmf_ranking_score": "{:.3f}",
                 "pmf_predicted_rating": "{:.3f}",
             }
         ),
@@ -150,22 +161,35 @@ def main() -> None:
         use_container_width=True,
     )
 
-    plot_data = comparison.head(min(15, len(comparison))).copy()
-    plot_data["title_short"] = plot_data["title"].str.slice(0, 36)
-    fig, ax = plt.subplots(figsize=(10, max(4, len(plot_data) * 0.4)))
-    positions = np.arange(len(plot_data))
-    ax.scatter(plot_data["svd_predicted_rating"], positions, label="SVD", s=50)
-    ax.scatter(plot_data["pmf_predicted_rating"], positions, label="PMF", s=50)
-    ax.set_yticks(positions, plot_data["title_short"])
-    ax.invert_yaxis()
-    ax.set_xlabel("Predicted rating")
-    ax.set_title("Recommendation score comparison")
-    ax.grid(axis="x", alpha=0.25)
-    ax.legend()
-    fig.tight_layout()
-    st.pyplot(fig)
+    chart_frames = []
+    for prefix, label in (("svd", "SVD"), ("pmf", "PMF")):
+        model_points = comparison[
+            ["movie_id", "title", f"{prefix}_ranking_score", f"{prefix}_rank"]
+        ].dropna(subset=[f"{prefix}_ranking_score"])
+        model_points = model_points.rename(
+            columns={
+                f"{prefix}_ranking_score": "ranking_score",
+                f"{prefix}_rank": "rank",
+            }
+        )
+        model_points["model"] = label
+        chart_frames.append(model_points)
+    chart_data = pd.concat(chart_frames, ignore_index=True)
+    chart_data["movie"] = (
+        chart_data["title"].str.slice(0, 48)
+        + " ("
+        + chart_data["movie_id"].astype(int).astype(str)
+        + ")"
+    )
+    st.subheader("Raw ranking score comparison")
+    st.scatter_chart(
+        chart_data,
+        x="ranking_score",
+        y="movie",
+        color="model",
+        use_container_width=True,
+    )
 
 
 if __name__ == "__main__":
     main()
-

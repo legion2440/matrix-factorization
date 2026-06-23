@@ -80,10 +80,10 @@ def plot_user_comparison(comparison: pd.DataFrame, path: str | Path) -> None:
     view = view.head(15).iloc[::-1]
     positions = np.arange(len(view))
     fig, ax = plt.subplots(figsize=(11, 7))
-    ax.scatter(view["svd_predicted_rating"], positions, label="SVD", s=55)
-    ax.scatter(view["pmf_predicted_rating"], positions, label="PMF", s=55)
+    ax.scatter(view["svd_ranking_score"], positions, label="SVD", s=55)
+    ax.scatter(view["pmf_ranking_score"], positions, label="PMF", s=55)
     ax.set_yticks(positions, view["label"])
-    ax.set(xlabel="Predicted rating", title="Recommendation score comparison")
+    ax.set(xlabel="Raw ranking score", title="Recommendation score comparison")
     ax.grid(axis="x", alpha=0.25)
     ax.legend()
     fig.tight_layout()
@@ -94,7 +94,7 @@ def plot_user_comparison(comparison: pd.DataFrame, path: str | Path) -> None:
 def plot_top_recommendations(comparison: pd.DataFrame, path: str | Path) -> None:
     view = comparison.copy()
     view["best_score"] = view[
-        ["svd_predicted_rating", "pmf_predicted_rating"]
+        ["svd_ranking_score", "pmf_ranking_score"]
     ].max(axis=1)
     view = view.nlargest(12, "best_score").sort_values("best_score")
     positions = np.arange(len(view))
@@ -102,20 +102,19 @@ def plot_top_recommendations(comparison: pd.DataFrame, path: str | Path) -> None
     fig, ax = plt.subplots(figsize=(11, 7))
     ax.barh(
         positions - width / 2,
-        view["svd_predicted_rating"],
+        view["svd_ranking_score"],
         height=width,
         label="SVD",
     )
     ax.barh(
         positions + width / 2,
-        view["pmf_predicted_rating"],
+        view["pmf_ranking_score"],
         height=width,
         label="PMF",
     )
     ax.set_yticks(positions, view["title"].fillna("").str.slice(0, 42))
-    ax.set(xlabel="Predicted rating", title="Top recommendation scores", xlim=(1, 5))
+    ax.set(xlabel="Raw ranking score", title="Top recommendation scores")
     ax.legend()
     fig.tight_layout()
     fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
-
