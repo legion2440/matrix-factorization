@@ -10,14 +10,26 @@
       "test": 147202
     }
   },
+  "Baseline_CF_MSE": 0.8241185717756636,
+  "Baseline_CF_RMSE": 0.9078097662922908,
   "SVD_MSE": 0.79351785357141,
   "SVD_RMSE": 0.890796190815503,
   "PMF_MSE": 0.7121652343689375,
   "PMF_RMSE": 0.8438988294629503,
+  "SVD_vs_Baseline_improvement_%": 1.8741344396717925,
+  "PMF_vs_Baseline_improvement_%": 7.040124396366422,
   "PMF_vs_SVD_improvement_%": 5.264656701059678,
+  "SVD_beats_Baseline_CF": true,
+  "PMF_beats_Baseline_CF": true,
   "SVD_target_met": true,
   "PMF_target_met": true,
   "improvement_target_met": true,
+  "baseline_best_params": {
+    "user_regularization": 2.0,
+    "item_regularization": 2.0,
+    "n_iterations": 20,
+    "validation_rmse": 0.9054592869944529
+  },
   "svd_best_params": {
     "n_factors": 20,
     "item_bias_regularization": 5.0

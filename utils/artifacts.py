@@ -64,10 +64,26 @@ def plot_predicted_vs_actual(
     plt.close(fig)
 
 
-def plot_rmse_comparison(svd_rmse: float, pmf_rmse: float, path: str | Path) -> None:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    bars = ax.bar(["SVD", "PMF"], [svd_rmse, pmf_rmse], color=["#4c78a8", "#f58518"])
-    ax.set(ylabel="Test RMSE", title="Model RMSE comparison", ylim=(0, max(svd_rmse, pmf_rmse) * 1.2))
+def plot_rmse_comparison(
+    svd_rmse: float,
+    pmf_rmse: float,
+    path: str | Path,
+    baseline_rmse: float | None = None,
+) -> None:
+    labels = ["SVD", "PMF"]
+    values = [svd_rmse, pmf_rmse]
+    colors = ["#4c78a8", "#f58518"]
+    if baseline_rmse is not None:
+        labels = ["Baseline CF", *labels]
+        values = [baseline_rmse, *values]
+        colors = ["#72b7b2", *colors]
+    fig, ax = plt.subplots(figsize=(7, 4))
+    bars = ax.bar(labels, values, color=colors)
+    ax.set(
+        ylabel="Test RMSE",
+        title="Model RMSE comparison",
+        ylim=(0, max(values) * 1.2),
+    )
     ax.bar_label(bars, fmt="%.4f")
     fig.tight_layout()
     fig.savefig(path, dpi=160)

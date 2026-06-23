@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from models.baseline_cf import BaselineCFModel
 from models.pmf_model import PMFModel
 from models.svd_model import SVDModel
 from scripts.download_data import download_movielens
@@ -27,6 +28,15 @@ from utils.matrix_creation import (
     save_normalized_matrix_csv,
 )
 from utils.metrics import mse, rmse
+from utils.interpretability import (
+    build_local_pmf_explanations,
+    build_pmf_factor_genre_profiles,
+    build_pmf_factor_interpretation,
+    build_pmf_movie_similarities,
+    plot_pmf_latent_factor_heatmap,
+    plot_user_explanation,
+    select_audit_users,
+)
 from utils.recommendation import (
     PMFRecommendationModel,
     SVDRecommendationModel,
@@ -36,6 +46,8 @@ from utils.split import deterministic_user_split
 
 
 RANDOM_STATE = 42
+BASELINE_BIAS_REGULARIZATION_GRID = [1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
+BASELINE_ITERATIONS = 20
 SVD_GRID = [5, 10, 20, 40, 60]
 SVD_ITEM_BIAS_REGULARIZATION_GRID = [0.0, 5.0, 10.0, 20.0, 40.0, 80.0]
 PMF_FACTOR_GRID = [96, 112, 128]
@@ -131,6 +143,68 @@ def _tune_svd(
         ),
     )
     return best, results
+
+
+def _tune_baseline_cf(
+    train_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    validation_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_users: int,
+    n_items: int,
+) -> tuple[dict[str, float | int], list[dict[str, float | int]]]:
+    train_users, train_items, train_ratings = train_arrays
+    validation_users, validation_items, validation_ratings = validation_arrays
+    results: list[dict[str, float | int]] = []
+    for regularization in BASELINE_BIAS_REGULARIZATION_GRID:
+        model = BaselineCFModel(
+            n_users=n_users,
+            n_items=n_items,
+            user_regularization=regularization,
+            item_regularization=regularization,
+            n_iterations=BASELINE_ITERATIONS,
+            random_state=RANDOM_STATE,
+        ).fit(train_users, train_items, train_ratings)
+        predictions = model.predict_pairs(validation_users, validation_items, clip=True)
+        validation_mse = mse(validation_ratings, predictions)
+        validation_rmse = rmse(validation_ratings, predictions)
+        results.append(
+            {
+                "user_regularization": float(regularization),
+                "item_regularization": float(regularization),
+                "n_iterations": BASELINE_ITERATIONS,
+                "validation_mse": float(validation_mse),
+                "validation_rmse": float(validation_rmse),
+            }
+        )
+        print(
+            "Baseline CF "
+            f"bias_reg={regularization:g}: validation RMSE={validation_rmse:.6f}"
+        )
+    best = min(
+        results,
+        key=lambda row: (
+            row["validation_rmse"],
+            row["user_regularization"],
+            row["item_regularization"],
+        ),
+    )
+    return best, results
+
+
+def _fit_final_baseline_cf(
+    combined_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_users: int,
+    n_items: int,
+    best_result: dict[str, float | int],
+) -> BaselineCFModel:
+    model = BaselineCFModel(
+        n_users=n_users,
+        n_items=n_items,
+        user_regularization=float(best_result["user_regularization"]),
+        item_regularization=float(best_result["item_regularization"]),
+        n_iterations=int(best_result["n_iterations"]),
+        random_state=RANDOM_STATE,
+    )
+    return model.fit(*combined_arrays)
 
 
 def _tune_pmf(
@@ -305,6 +379,15 @@ def main() -> None:
         index_to_movie,
     )
 
+    train_arrays = _indexed(split.train, user_to_index, movie_to_index)
+    validation_arrays = _indexed(split.validation, user_to_index, movie_to_index)
+    baseline_best, baseline_results = _tune_baseline_cf(
+        train_arrays,
+        validation_arrays,
+        len(user_to_index),
+        len(movie_to_index),
+    )
+
     svd_best, svd_results = _tune_svd(
         train_matrix,
         train_means,
@@ -314,8 +397,6 @@ def main() -> None:
     )
     save_json(reports_dir / "svd_tuning.json", svd_results)
 
-    train_arrays = _indexed(split.train, user_to_index, movie_to_index)
-    validation_arrays = _indexed(split.validation, user_to_index, movie_to_index)
     pmf_best, pmf_results, pmf_history = _tune_pmf(
         train_arrays,
         validation_arrays,
@@ -354,6 +435,12 @@ def main() -> None:
     )
 
     combined_arrays = _indexed(train_validation, user_to_index, movie_to_index)
+    final_baseline = _fit_final_baseline_cf(
+        combined_arrays,
+        len(user_to_index),
+        len(movie_to_index),
+        baseline_best,
+    )
     final_pmf_params = {
         key: pmf_best[key]
         for key in (
@@ -379,13 +466,42 @@ def main() -> None:
     test_users, test_movies, test_actual = _indexed(
         split.test, user_to_index, movie_to_index
     )
+    baseline_test_predictions = final_baseline.predict_pairs(test_users, test_movies)
     svd_test_predictions = final_svd.predict_pairs(test_users, test_movies)
     pmf_test_predictions = final_pmf.predict_pairs(test_users, test_movies)
+    baseline_mse = mse(test_actual, baseline_test_predictions)
+    baseline_rmse = rmse(test_actual, baseline_test_predictions)
     svd_mse = mse(test_actual, svd_test_predictions)
     pmf_mse = mse(test_actual, pmf_test_predictions)
     svd_rmse = rmse(test_actual, svd_test_predictions)
     pmf_rmse = rmse(test_actual, pmf_test_predictions)
     improvement = (svd_rmse - pmf_rmse) / svd_rmse * 100.0
+    svd_vs_baseline = (baseline_rmse - svd_rmse) / baseline_rmse * 100.0
+    pmf_vs_baseline = (baseline_rmse - pmf_rmse) / baseline_rmse * 100.0
+
+    save_json(
+        reports_dir / "baseline_tuning.json",
+        {
+            "model": "regularized_bias_only_collaborative_filtering",
+            "prediction_formula": "global_mean + user_bias + item_bias",
+            "random_state": RANDOM_STATE,
+            "selection_metric": "validation_rmse",
+            "uses_test_for_tuning": False,
+            "regularization_grid": BASELINE_BIAS_REGULARIZATION_GRID,
+            "results": baseline_results,
+            "selected": baseline_best,
+            "final_refit": {
+                "training_rows": len(train_validation),
+                "uses_train_plus_validation": True,
+                "uses_validation_holdout": False,
+            },
+            "test_evaluation": {
+                "test_rows": len(split.test),
+                "mse": float(baseline_mse),
+                "rmse": float(baseline_rmse),
+            },
+        },
+    )
 
     metrics = {
         "random_state": RANDOM_STATE,
@@ -399,14 +515,26 @@ def main() -> None:
                 "test": len(split.test),
             },
         },
+        "Baseline_CF_MSE": baseline_mse,
+        "Baseline_CF_RMSE": baseline_rmse,
         "SVD_MSE": svd_mse,
         "SVD_RMSE": svd_rmse,
         "PMF_MSE": pmf_mse,
         "PMF_RMSE": pmf_rmse,
+        "SVD_vs_Baseline_improvement_%": svd_vs_baseline,
+        "PMF_vs_Baseline_improvement_%": pmf_vs_baseline,
         "PMF_vs_SVD_improvement_%": improvement,
+        "SVD_beats_Baseline_CF": svd_rmse < baseline_rmse,
+        "PMF_beats_Baseline_CF": pmf_rmse < baseline_rmse,
         "SVD_target_met": svd_rmse <= 0.90,
         "PMF_target_met": pmf_rmse <= 0.85,
         "improvement_target_met": improvement >= 5.0,
+        "baseline_best_params": {
+            "user_regularization": float(baseline_best["user_regularization"]),
+            "item_regularization": float(baseline_best["item_regularization"]),
+            "n_iterations": int(baseline_best["n_iterations"]),
+            "validation_rmse": float(baseline_best["validation_rmse"]),
+        },
         "svd_best_params": {
             "n_factors": int(svd_best["n_factors"]),
             "item_bias_regularization": float(
@@ -428,11 +556,47 @@ def main() -> None:
         pmf_test_predictions,
         reports_dir / "predicted_vs_actual.png",
     )
-    plot_rmse_comparison(svd_rmse, pmf_rmse, reports_dir / "rmse_comparison.png")
+    plot_rmse_comparison(
+        svd_rmse,
+        pmf_rmse,
+        reports_dir / "rmse_comparison.png",
+        baseline_rmse=baseline_rmse,
+    )
 
     model_movies = data.movies.loc[
         data.movies["movie_id"].isin(index_to_movie)
     ].copy()
+    factor_interpretation = build_pmf_factor_interpretation(
+        final_pmf.item_factors,
+        index_to_movie,
+        model_movies,
+        n_factors=5,
+        top_n=8,
+    )
+    factor_interpretation.to_csv(
+        reports_dir / "pmf_factor_interpretation.csv", index=False
+    )
+    genre_profiles = build_pmf_factor_genre_profiles(factor_interpretation)
+    genre_profiles.to_csv(
+        reports_dir / "pmf_factor_genre_profiles.csv", index=False
+    )
+    plot_pmf_latent_factor_heatmap(
+        factor_interpretation,
+        final_pmf.item_factors,
+        movie_to_index,
+        reports_dir / "pmf_latent_factor_heatmap.png",
+    )
+    similarities = build_pmf_movie_similarities(
+        final_pmf.item_factors,
+        index_to_movie,
+        model_movies,
+        data.ratings,
+        movie_to_index,
+        n_anchors=5,
+        top_n=10,
+    )
+    similarities.to_csv(reports_dir / "pmf_movie_similarities.csv", index=False)
+
     svd_rec_model = SVDRecommendationModel(
         svd_prediction_matrix,
         user_to_index,
@@ -449,7 +613,16 @@ def main() -> None:
         model_movies,
         data.ratings,
     )
-    evaluated_users = _select_showcase_users(split.train)
+    test_with_predictions = split.test.copy()
+    test_with_predictions["svd_prediction"] = svd_test_predictions
+    test_with_predictions["pmf_prediction"] = pmf_test_predictions
+    evaluated_users = select_audit_users(
+        split.train,
+        split.validation,
+        test_with_predictions,
+        min_train_ratings=50,
+        min_test_ratings=10,
+    )
     save_json(reports_dir / "evaluated_users.json", evaluated_users)
     first_comparison: pd.DataFrame | None = None
     for selection in evaluated_users:
@@ -460,6 +633,23 @@ def main() -> None:
         comparison.to_csv(
             reports_dir / f"user_{user_id}_recommendations.csv", index=False
         )
+        explanations = build_local_pmf_explanations(
+            user_id,
+            str(selection["role"]),
+            comparison,
+            final_pmf,
+            user_to_index,
+            movie_to_index,
+            data.ratings,
+            model_movies,
+        )
+        explanations.to_csv(
+            reports_dir / f"user_{user_id}_explanations.csv", index=False
+        )
+        plot_user_explanation(
+            explanations,
+            reports_dir / f"user_{user_id}_explanation.png",
+        )
         if first_comparison is None:
             first_comparison = comparison
     assert first_comparison is not None
@@ -467,6 +657,7 @@ def main() -> None:
     plot_top_recommendations(first_comparison, reports_dir / "top_recommendations.png")
 
     print("\nPipeline complete")
+    print(f"Baseline CF test RMSE: {baseline_rmse:.6f}")
     print(f"SVD test RMSE: {svd_rmse:.6f}")
     print(f"PMF test RMSE: {pmf_rmse:.6f}")
     print(f"PMF improvement: {improvement:.3f}%")

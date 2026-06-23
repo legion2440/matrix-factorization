@@ -1,20 +1,32 @@
 [
   {
-    "quantile": 0.25,
-    "target_train_count": 32.0,
-    "user_id": 91,
-    "train_ratings": 32
+    "user_id": 3233,
+    "role": "train_profile_accurate",
+    "selection_reason": "Eligible user nearest the lower-quartile PMF test RMSE (0.6930) with at least 50 train and 10 test ratings.",
+    "train_ratings": 113,
+    "validation_ratings": 24,
+    "test_ratings": 24,
+    "svd_test_rmse": 0.7197019566058521,
+    "pmf_test_rmse": 0.6928196764587805
   },
   {
-    "quantile": 0.5,
-    "target_train_count": 68.0,
-    "user_id": 40,
-    "train_ratings": 68
+    "user_id": 119,
+    "role": "train_profile_less_accurate",
+    "selection_reason": "Eligible user nearest the upper-quartile PMF test RMSE (0.9402) and worse than the accurate profile.",
+    "train_ratings": 75,
+    "validation_ratings": 15,
+    "test_ratings": 15,
+    "svd_test_rmse": 0.850408110233395,
+    "pmf_test_rmse": 0.9401190793560166
   },
   {
-    "quantile": 0.75,
-    "target_train_count": 146.0,
-    "user_id": 1186,
-    "train_ratings": 146
+    "user_id": 133,
+    "role": "test_case",
+    "selection_reason": "Separate deterministic test case near the median eligible test support (25.0) and distinct from the two training-profile users.",
+    "train_ratings": 120,
+    "validation_ratings": 25,
+    "test_ratings": 25,
+    "svd_test_rmse": 1.0942261684861865,
+    "pmf_test_rmse": 1.0087666741470647
   }
 ]

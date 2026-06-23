@@ -1,96 +1,228 @@
 # MovieLens 1M Matrix Factorization
 
-This project builds a reproducible movie recommender on the official [MovieLens 1M dataset](https://grouplens.org/datasets/movielens/1m/). It compares truncated SVD from `scipy.sparse.linalg.svds` with a locally implemented biased probabilistic matrix factorization model trained by shuffled SGD. Generated artifacts power an interactive Streamlit application without retraining.
+This project builds a reproducible MovieLens 1M recommender and compares three local models on the same deterministic split:
 
-## Clean-clone run order on Windows with Git Bash
+- Baseline collaborative filtering: regularized bias-only model, `global_mean + user_bias + item_bias`.
+- SVD: truncated sparse residual factorization with regularized item residual bias.
+- PMF: locally implemented biased matrix factorization trained by seeded shuffled SGD.
 
-1. Install dependencies:
+Generated artifacts power the notebook and Streamlit dashboard without retraining at display time.
 
-   ```bash
-   cd /d/TSchool/matrix-factorization
-   python -m venv .venv
-   source .venv/Scripts/activate
-   python -m pip install -r requirements.txt
-   ```
+## Clean-Clone Order
 
-2. Generate data, models, reports, and serving artifacts:
-
-   ```bash
-   python -m scripts.run_pipeline
-   ```
-
-3. Validate the generated project:
-
-   ```bash
-   python -m scripts.validate_project
-   ```
-
-4. Launch the application:
-
-   ```bash
-   python -m streamlit run app.py
-   ```
-
-`run_pipeline` downloads MovieLens 1M when needed and generates all ignored serving
-artifacts. Tests and notebook execution can be run independently:
+Use Windows Git Bash from the project root:
 
 ```bash
+cd /d/TSchool/matrix-factorization
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install -r requirements.txt
+python -m scripts.run_pipeline
 python -m pytest -q
+python -m compileall models utils scripts app.py
 python -m scripts.validate_project
 python -m jupyter nbconvert --to notebook --execute Movie_Recommender_System.ipynb --output Movie_Recommender_System.ipynb
+python -m scripts.validate_project
+bash scripts/smoke_streamlit.sh
+```
+
+For manual dashboard use after artifacts exist:
+
+```bash
 python -m streamlit run app.py
 ```
 
-## Project structure
+The pipeline downloads MovieLens 1M only when raw files are missing.
+
+## Project Structure
 
 - `data/`: raw MovieLens `ratings.dat`, `users.dat`, and `movies.dat`.
-- `processed/`: generated split CSVs and mappings. The large normalized
-  `user_item_matrix.csv` is generated locally and ignored by Git.
-- `models/`: SVD and local PMF implementations.
-- `utils/`: parsing, validation, splitting, matrix, metric, recommendation, and artifact helpers.
-- `reports/`: generated model factors, metrics, tuning results, plots, and example
-  recommendations. The large `svd_predictions.npy` serving matrix is generated
-  locally and ignored by Git.
-- `scripts/`: data download, complete pipeline, validation, and bounded Streamlit smoke test.
-- `tests/`: fast synthetic unit and integration tests.
-- `Movie_Recommender_System.ipynb`: executed analysis using reusable production modules.
+- `processed/`: generated train/validation/test splits, mappings, and normalized matrix CSV.
+- `models/`: local `BaselineCFModel`, `SVDModel`, and `PMFModel`.
+- `utils/`: data loading, splitting, matrix construction, metrics, recommendation, artifact, and interpretability helpers.
+- `reports/`: generated metrics, tuning diagnostics, factors, plots, recommendations, and explanations.
+- `scripts/`: data download, full pipeline, validation, notebook builder, and bounded Streamlit smoke test.
+- `tests/`: fast synthetic behavior tests.
+- `Movie_Recommender_System.ipynb`: executed artifact-backed audit report.
 - `app.py`: artifact-backed Streamlit dashboard.
 
-## Methodology
+## Data Split
 
-The original observed rating rows are split independently per user with `random_state=42`. Allocation is approximately 70% train, 15% validation, and 15% test, with at least one validation and test interaction for eligible users. Every user retains training history. Any held-out movie absent from train is deterministically moved to train. Partitions are non-overlapping and both models use the identical rows. Hyperparameters are chosen only by validation RMSE; test is evaluated exactly once after retraining on train plus validation.
+The original rating rows are split deterministically per user with `random_state=42`. The target ratio is 70% train, 15% validation, and 15% test. Every user keeps training history, and held-out movies absent from train are deterministically moved into train so validation/test rows are covered by mappings.
 
-For SVD, each user's mean is calculated from observed training ratings and subtracted only from those observations. A regularized item correction is then estimated from the observed user-centered residuals, and `svds` factorizes the remaining sparse residual matrix. Unobserved entries stay conceptually missing and appear as sparse zeros. Singular values are reordered descending before reconstruction; user means and item corrections are restored.
+Actual split counts:
 
-`reports/svd_predictions.npy` stores raw, unclipped SVD prediction scores so
-recommendation ordering remains meaningful above 5 and below 1. It is not stored
-in Git because of its size. `processed/user_item_matrix.csv` is also generated and
-ignored for the same reason. Displayed ratings and all MSE/RMSE calculations clip
-model predictions to the valid `[1, 5]` rating range.
+| Split | Rows |
+|---|---:|
+| Train | 705,806 |
+| Validation | 147,201 |
+| Test | 147,202 |
 
-PMF predicts `global_mean + user_bias + item_bias + dot(user_factors, item_factors)`. The local implementation uses seeded initialization, shuffled rating-level SGD, separate factor and bias regularization, validation-only early stopping, best-checkpoint restoration, and finite-value checks. The bounded validation search jointly evaluates 96, 112, and 128 factors with factor regularization 0.05, 0.06, and 0.07 at learning rate 0.006. Each configuration may run up to 70 epochs with patience 8. Test ratings are not used for this selection.
+Validation is used for hyperparameter and stopping decisions. Test rows are evaluated once after final refit on train plus validation.
 
-MSE is the mean squared test-rating error; RMSE is its square root. PMF improvement is `(SVD_RMSE - PMF_RMSE) / SVD_RMSE * 100`.
+## Benchmark CF
 
-## Evaluated users and recommendations
+The benchmark collaborative filtering model is implemented in `models/baseline_cf.py` without Surprise, scikit-learn, or a recommender library. It learns regularized user and item biases only from observed training ratings:
 
-Overall metrics use every test rating. Three example users are selected before recommendation inspection: the users nearest the 25th, 50th, and 75th percentiles of training interaction count. Recommendations exclude every movie in each user's full known MovieLens history. They rank by raw model score descending and use movie ID ascending only when raw scores are equal. Tables expose both the raw `ranking_score` and its clipped `predicted_rating`.
+```text
+prediction = global_mean + user_bias + item_bias
+```
 
-## Final generated metrics
+Regularization is selected on validation from `[1, 2, 5, 10, 20, 40, 80]`. The selected value is 2.0 for both user and item biases. Final baseline refit uses train plus validation, then evaluates the untouched test rows.
 
-The deterministic full run produced:
+## SVD Methodology
+
+SVD user-centers observed training ratings, estimates a regularized item residual bias from observed residuals, factorizes the sparse residual matrix with `scipy.sparse.linalg.svds`, then restores user means and item corrections. `reports/svd_predictions.npy` stores raw, unclipped scores for recommendation ranking. Displayed ratings and RMSE/MSE use clipping to `[1, 5]`.
+
+Selected SVD parameters:
+
+- factors: 20
+- item-bias regularization: 5.0
+
+## PMF Methodology
+
+PMF predicts:
+
+```text
+global_mean + user_bias + item_bias + dot(user_factors, item_factors)
+```
+
+The local SGD implementation uses seeded initialization, deterministic per-epoch shuffling from `random_state=42`, separate factor and bias regularization, validation-only early stopping, best-checkpoint restoration, and finite-value checks.
+
+The stable PMF grid is intentionally preserved:
+
+- factors: 96, 112, 128
+- learning rate: 0.006
+- factor regularization: 0.05, 0.06, 0.07
+- bias regularization: 0.02
+- max tuning epochs: 70
+- patience: 8
+
+Selected PMF config:
+
+- factors: 128
+- learning rate: 0.006
+- factor regularization: 0.06
+- bias regularization: 0.02
+- selected epoch: 53
+- validation RMSE: 0.849353
+
+## Overfitting Protection
+
+For the selected PMF config, validation RMSE reaches its minimum at epoch 53. With patience 8, tuning runs through epoch 61 and then stops. The final PMF refit uses exactly 53 epochs on train plus validation and does not use a validation holdout or the test set for stopping.
+
+The selected epoch is not on the 70-epoch boundary. The selected factor count is at the searched factor boundary of 128, which is reported as a limitation rather than retuned here.
+
+## Final Metrics
 
 | Model | Test MSE | Test RMSE |
 |---|---:|---:|
+| Baseline CF | 0.824119 | 0.907810 |
 | SVD | 0.793518 | 0.890796 |
 | PMF | 0.712165 | 0.843899 |
 
-PMF improves RMSE over SVD by **5.265%**. All assignment targets are met.
+SVD improves over baseline by 1.874% RMSE. PMF improves over baseline by 7.040% RMSE and over SVD by 5.265% RMSE.
 
-Validation selected SVD rank 20 with item-bias regularization 5.0. PMF validation selected 128 factors, learning rate 0.006, factor regularization 0.06, bias regularization 0.02, and epoch 53, with validation RMSE 0.849353. Early stopping completed after 61 tuning epochs. The selected epoch is below the 70-epoch boundary, but the selected factor count is the search maximum of 128, so the factor boundary remains open and is reported rather than expanded automatically. Final PMF training uses train plus validation for exactly 53 epochs without a holdout. The exact split contains 705,806 train rows, 147,201 validation rows, and 147,202 untouched test rows.
+Acceptance checks:
 
-The automatically selected showcase users are user 91 (32 train ratings, nearest the 25th percentile), user 40 (68, median), and user 1186 (146, nearest the 75th percentile). Authoritative machine-readable values remain in `reports/model_metrics.json` and `reports/evaluated_users.json`.
+```text
+SVD_RMSE < Baseline_CF_RMSE
+PMF_RMSE < Baseline_CF_RMSE
+```
+
+Both pass.
+
+## Interpretability
+
+Global PMF factor interpretation uses saved final-refit item factors. The report selects the top five factors by item-loading variance and lists the highest positive and negative movies for each factor. It also aggregates genres by factor polarity and renders a latent-factor heatmap.
+
+Important limitation: the sign of a latent factor is arbitrary. Factor meaning is inferred descriptively from movies and genres on both poles; it is not objective ground truth.
+
+Similarity analysis computes cosine similarity between PMF item-factor vectors. Anchor movies are selected deterministically from popular mapped movies while encouraging genre diversity. Self-matches are excluded, and ties sort by similarity descending then movie ID ascending.
+
+## Three Audit Users
+
+The split is interaction-level, so selected users can have train, validation, and test rows. The two training-profile users are selected from users with sufficient train/test support near lower and upper quartiles of PMF per-user test RMSE. The third user is a separate deterministic test case.
+
+| Role | User ID | Train | Validation | Test | SVD RMSE | PMF RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| `train_profile_accurate` | 3233 | 113 | 24 | 24 | 0.719702 | 0.692820 |
+| `train_profile_less_accurate` | 119 | 75 | 15 | 15 | 0.850408 | 0.940119 |
+| `test_case` | 133 | 120 | 25 | 25 | 1.094226 | 1.008767 |
+
+The accurate profile has lower PMF per-user test RMSE than the less-accurate profile. In the notebook, their train support, rating distributions, high-rating share, genre entropy, movie popularity, recommendations, and local explanation examples are compared. The available statistics explain the difference partially; the observed error gap is not treated as a universal profile rule.
+
+## Local Explanations
+
+Each audit user has:
+
+- `reports/user_<id>_recommendations.csv`
+- `reports/user_<id>_explanations.csv`
+- `reports/user_<id>_explanation.png`
+
+The explanation CSV reconstructs each raw PMF recommendation score as:
+
+```text
+global_mean
++ user_bias
++ item_bias
++ sum(user_factor[k] * item_factor[k])
+```
+
+The validator enforces reconstruction error `<= 1e-5`. Each row also includes the top three latent factor contributions and the nearest highly rated known movie in PMF item-factor space, with cosine similarity and shared genres.
+
+## Streamlit Dashboard
+
+`app.py` reads saved artifacts only. It does not train or tune models at startup.
+
+Dashboard sections:
+
+1. Recommendations
+2. Why recommended
+3. Model evaluation
+4. Global latent factors
+
+The dashboard includes manual user ID input, so invalid or unknown IDs can be audited. Invalid input displays `st.error` and does not raise a traceback.
+
+## Generated Artifacts
+
+Core artifacts:
+
+- `reports/baseline_tuning.json`
+- `reports/model_metrics.json`
+- `reports/rmse_comparison.png`
+- `reports/predicted_vs_actual.png`
+- `reports/pmf_convergence.png`
+- `reports/user_comparison.png`
+- `reports/top_recommendations.png`
+- `reports/svd_predictions.npy`
+- `reports/svd_metadata.json`
+- `reports/pmf_tuning.json`
+- `reports/pmf_factors/`
+
+Interpretability and audit artifacts:
+
+- `reports/pmf_factor_interpretation.csv`
+- `reports/pmf_factor_genre_profiles.csv`
+- `reports/pmf_latent_factor_heatmap.png`
+- `reports/pmf_movie_similarities.csv`
+- `reports/evaluated_users.json`
+- `reports/user_3233_recommendations.csv`
+- `reports/user_3233_explanations.csv`
+- `reports/user_3233_explanation.png`
+- `reports/user_119_recommendations.csv`
+- `reports/user_119_explanations.csv`
+- `reports/user_119_explanation.png`
+- `reports/user_133_recommendations.csv`
+- `reports/user_133_explanations.csv`
+- `reports/user_133_explanation.png`
+
+## Validation
+
+`scripts/validate_project.py` checks required paths, RMSE targets, benchmark-vs-MF acceptance, PMF grid diagnostics, final refit metadata, raw SVD artifact behavior, mappings, notebook error outputs, app import, recommendation ordering, factor interpretation, similarity sorting, audit-user roles/support, and PMF explanation decomposition.
+
+Synthetic tests cover baseline CF behavior, interpretability helpers, user selection, recommendation ordering, split behavior, model behavior, metrics, and validator helper failures.
 
 ## Limitations
 
-The models use collaborative ratings only. They do not solve new-user cold start, learn semantic genre preferences directly, optimize ranking metrics, or model changing taste over time. Unrated catalog items are omitted from model mappings because they contain no collaborative signal.
+The models use collaborative ratings only. They do not solve cold start for new users or unrated movies, optimize ranking metrics directly, or model changing taste over time. PMF latent factors are descriptive analysis tools, not proven semantic dimensions. The selected PMF factor count is at the searched boundary, and a wider future search could be informative, but this audit pass preserves the stable tuning setup.

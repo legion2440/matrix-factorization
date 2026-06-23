@@ -1,0 +1,15 @@
+movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
+2905,Sanjuro (1962),Action|Adventure,4.891072,4.891072,1.0,4.5970755,4.5970755,9.0
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,4.8627715,4.8627715,2.0,4.5995474,4.5995474,8.0
+2571,"Matrix, The (1999)",Action|Sci-Fi|Thriller,4.7999687,4.7999687,3.0,,,
+922,Sunset Blvd. (a.k.a. Sunset Boulevard) (1950),Film-Noir,4.79064,4.79064,4.0,4.5918846,4.5918846,10.0
+3338,For All Mankind (1989),Documentary,4.76853,4.76853,5.0,4.7333093,4.7333093,2.0
+1178,Paths of Glory (1957),Drama|War,4.7658195,4.7658195,6.0,,,
+2503,"Apple, The (Sib) (1998)",Drama,4.7630177,4.7630177,7.0,4.852531,4.852531,1.0
+904,Rear Window (1954),Mystery|Thriller,4.752506,4.752506,8.0,,,
+750,Dr. Strangelove or: How I Learned to Stop Worrying and Love the Bomb (1963),Sci-Fi|War,4.743888,4.743888,9.0,4.6269503,4.6269503,7.0
+720,Wallace & Gromit: The Best of Aardman Animation (1996),Animation,4.743114,4.743114,10.0,,,
+1207,To Kill a Mockingbird (1962),Drama,,,,4.6845098,4.6845098,3.0
+1420,Message to Love: The Isle of Wight Festival (1996),Documentary,,,,4.6509557,4.6509557,4.0
+1423,Hearts and Minds (1996),Drama,,,,4.6382494,4.6382494,5.0
+3022,"General, The (1927)",Comedy,,,,4.63654,4.63654,6.0

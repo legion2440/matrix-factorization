@@ -1,0 +1,51 @@
+anchor_movie_id,anchor_title,anchor_genres,similar_movie_id,similar_title,similar_genres,cosine_similarity,rank
+2858,American Beauty (1999),Comedy|Drama,1617,L.A. Confidential (1997),Crime|Film-Noir|Mystery|Thriller,0.5449017336828101,1
+2858,American Beauty (1999),Comedy|Drama,1222,Full Metal Jacket (1987),Action|Drama|War,0.5356489808119793,2
+2858,American Beauty (1999),Comedy|Drama,296,Pulp Fiction (1994),Crime|Drama,0.5208027752969122,3
+2858,American Beauty (1999),Comedy|Drama,1728,"Winter Guest, The (1997)",Drama,0.5134775144255608,4
+2858,American Beauty (1999),Comedy|Drama,2997,Being John Malkovich (1999),Comedy,0.4943385105632132,5
+2858,American Beauty (1999),Comedy|Drama,50,"Usual Suspects, The (1995)",Crime|Thriller,0.4896815986644672,6
+2858,American Beauty (1999),Comedy|Drama,3317,Wonder Boys (2000),Comedy|Drama,0.47832321121795984,7
+2858,American Beauty (1999),Comedy|Drama,1673,Boogie Nights (1997),Drama,0.47351143401421847,8
+2858,American Beauty (1999),Comedy|Drama,3949,Requiem for a Dream (2000),Drama,0.46924205862562196,9
+2858,American Beauty (1999),Comedy|Drama,3171,Room at the Top (1959),Drama,0.4652401735038923,10
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,0.9368732065528415,1
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1210,Star Wars: Episode VI - Return of the Jedi (1983),Action|Adventure|Romance|Sci-Fi|War,0.8785141586003389,2
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1198,Raiders of the Lost Ark (1981),Action|Adventure,0.8295136276278663,3
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1291,Indiana Jones and the Last Crusade (1989),Action|Adventure,0.673345107289797,4
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,2628,Star Wars: Episode I - The Phantom Menace (1999),Action|Adventure|Fantasy|Sci-Fi,0.5842540997753796,5
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,2716,Ghostbusters (1984),Comedy|Horror,0.5177385285302758,6
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,592,Batman (1989),Action|Adventure|Crime|Drama,0.4796292610193988,7
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1374,Star Trek: The Wrath of Khan (1982),Action|Adventure|Sci-Fi,0.4753633005537933,8
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1270,Back to the Future (1985),Comedy|Sci-Fi,0.4718171570670272,9
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,1197,"Princess Bride, The (1987)",Action|Adventure|Comedy|Romance,0.43964447366236103,10
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,0.9368732065528415,1
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,1210,Star Wars: Episode VI - Return of the Jedi (1983),Action|Adventure|Romance|Sci-Fi|War,0.876935422374066,2
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,1198,Raiders of the Lost Ark (1981),Action|Adventure,0.7755126221055866,3
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,1291,Indiana Jones and the Last Crusade (1989),Action|Adventure,0.648927175010225,4
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,2628,Star Wars: Episode I - The Phantom Menace (1999),Action|Adventure|Fantasy|Sci-Fi,0.5786020886115345,5
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,2716,Ghostbusters (1984),Comedy|Horror,0.5352467410521471,6
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,592,Batman (1989),Action|Adventure|Crime|Drama,0.5343280934529355,7
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,1374,Star Trek: The Wrath of Khan (1982),Action|Adventure|Sci-Fi,0.5157650231876489,8
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,2640,Superman (1978),Action|Adventure|Sci-Fi,0.4576161934874873,9
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,1270,Back to the Future (1985),Comedy|Sci-Fi,0.445743544690386,10
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,1240,"Terminator, The (1984)",Action|Sci-Fi|Thriller,0.7647790217829726,1
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,1036,Die Hard (1988),Action|Thriller,0.7190672421551119,2
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,1200,Aliens (1986),Action|Sci-Fi|Thriller|War,0.6775502561452946,3
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,2985,Robocop (1987),Action|Crime|Sci-Fi,0.6030459778697359,4
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,480,Jurassic Park (1993),Action|Adventure|Sci-Fi,0.5720166698811646,5
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,2916,Total Recall (1990),Action|Adventure|Sci-Fi|Thriller,0.5634059570824448,6
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,2000,Lethal Weapon (1987),Action|Comedy|Crime|Drama,0.5605540926979963,7
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,3527,Predator (1987),Action|Sci-Fi|Thriller,0.5372365935173864,8
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,1387,Jaws (1975),Action|Horror,0.5280664322452269,9
+589,Terminator 2: Judgment Day (1991),Action|Sci-Fi|Thriller,1214,Alien (1979),Action|Horror|Sci-Fi|Thriller,0.519501955267589,10
+1270,Back to the Future (1985),Comedy|Sci-Fi,2640,Superman (1978),Action|Adventure|Sci-Fi,0.7168816692000785,1
+1270,Back to the Future (1985),Comedy|Sci-Fi,2011,Back to the Future Part II (1989),Comedy|Sci-Fi,0.7135519740354787,2
+1270,Back to the Future (1985),Comedy|Sci-Fi,2797,Big (1988),Comedy|Fantasy,0.6641286785192173,3
+1270,Back to the Future (1985),Comedy|Sci-Fi,2012,Back to the Future Part III (1990),Comedy|Sci-Fi|Western,0.6478470368241358,4
+1270,Back to the Future (1985),Comedy|Sci-Fi,2716,Ghostbusters (1984),Comedy|Horror,0.6333880255225149,5
+1270,Back to the Future (1985),Comedy|Sci-Fi,1097,E.T. the Extra-Terrestrial (1982),Children's|Drama|Fantasy|Sci-Fi,0.6140777149902232,6
+1270,Back to the Future (1985),Comedy|Sci-Fi,2407,Cocoon (1985),Comedy|Sci-Fi,0.5977868725021227,7
+1270,Back to the Future (1985),Comedy|Sci-Fi,2054,"Honey, I Shrunk the Kids (1989)",Adventure|Children's|Comedy|Fantasy|Sci-Fi,0.585634844675595,8
+1270,Back to the Future (1985),Comedy|Sci-Fi,2420,"Karate Kid, The (1984)",Drama,0.5817476976814485,9
+1270,Back to the Future (1985),Comedy|Sci-Fi,1198,Raiders of the Lost Ark (1981),Action|Adventure,0.5776972962164094,10

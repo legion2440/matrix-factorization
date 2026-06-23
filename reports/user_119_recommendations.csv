@@ -1,0 +1,17 @@
+movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
+2571,"Matrix, The (1999)",Action|Sci-Fi|Thriller,4.6390224,4.6390224,1.0,4.904145,4.904145,1.0
+318,"Shawshank Redemption, The (1994)",Drama,4.561119,4.561119,2.0,4.7106075,4.7106075,4.0
+50,"Usual Suspects, The (1995)",Crime|Thriller,4.530924,4.530924,3.0,4.6440516,4.6440516,7.0
+2028,Saving Private Ryan (1998),Action|Drama|War,4.510336,4.510336,4.0,,,
+527,Schindler's List (1993),Drama|War,4.5027823,4.5027823,5.0,,,
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,4.45205,4.45205,6.0,,,
+2905,Sanjuro (1962),Action|Adventure,4.44966,4.44966,7.0,4.820765,4.820765,3.0
+1198,Raiders of the Lost Ark (1981),Action|Adventure,4.4331017,4.4331017,8.0,,,
+745,"Close Shave, A (1995)",Animation|Comedy|Thriller,4.42605,4.42605,9.0,,,
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,4.390708,4.390708,10.0,,,
+649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,,4.8490596,4.8490596,2.0
+3851,I'm the One That I Want (2000),Comedy,,,,4.696043,4.696043,5.0
+2810,Perfect Blue (1997),Animation|Mystery,,,,4.685517,4.685517,6.0
+2503,"Apple, The (Sib) (1998)",Drama,,,,4.6230865,4.6230865,8.0
+2197,Firelight (1997),Drama,,,,4.6166563,4.6166563,9.0
+2609,"King of Masks, The (Bian Lian) (1996)",Drama,,,,4.6117783,4.6117783,10.0

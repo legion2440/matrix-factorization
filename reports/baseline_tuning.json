@@ -1,0 +1,84 @@
+{
+  "model": "regularized_bias_only_collaborative_filtering",
+  "prediction_formula": "global_mean + user_bias + item_bias",
+  "random_state": 42,
+  "selection_metric": "validation_rmse",
+  "uses_test_for_tuning": false,
+  "regularization_grid": [
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    40.0,
+    80.0
+  ],
+  "results": [
+    {
+      "user_regularization": 1.0,
+      "item_regularization": 1.0,
+      "n_iterations": 20,
+      "validation_mse": 0.82002662046121,
+      "validation_rmse": 0.9055532123852303
+    },
+    {
+      "user_regularization": 2.0,
+      "item_regularization": 2.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8198565204045031,
+      "validation_rmse": 0.9054592869944529
+    },
+    {
+      "user_regularization": 5.0,
+      "item_regularization": 5.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8201514564769579,
+      "validation_rmse": 0.905622137801941
+    },
+    {
+      "user_regularization": 10.0,
+      "item_regularization": 10.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8218573876795598,
+      "validation_rmse": 0.9065635044935131
+    },
+    {
+      "user_regularization": 20.0,
+      "item_regularization": 20.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8270435160198847,
+      "validation_rmse": 0.9094193290335788
+    },
+    {
+      "user_regularization": 40.0,
+      "item_regularization": 40.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8391186787752756,
+      "validation_rmse": 0.9160342126663586
+    },
+    {
+      "user_regularization": 80.0,
+      "item_regularization": 80.0,
+      "n_iterations": 20,
+      "validation_mse": 0.8622623073612635,
+      "validation_rmse": 0.9285808028175381
+    }
+  ],
+  "selected": {
+    "user_regularization": 2.0,
+    "item_regularization": 2.0,
+    "n_iterations": 20,
+    "validation_mse": 0.8198565204045031,
+    "validation_rmse": 0.9054592869944529
+  },
+  "final_refit": {
+    "training_rows": 853007,
+    "uses_train_plus_validation": true,
+    "uses_validation_holdout": false
+  },
+  "test_evaluation": {
+    "test_rows": 147202,
+    "mse": 0.8241185717756636,
+    "rmse": 0.9078097662922908
+  }
+}
