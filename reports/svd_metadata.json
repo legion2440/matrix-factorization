@@ -1,0 +1,9 @@
+{
+  "n_factors": 20,
+  "item_bias_regularization": 5.0,
+  "random_state": 42,
+  "shape": [
+    6040,
+    3706
+  ]
+}

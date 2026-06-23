@@ -1,0 +1,20 @@
+movie_id,title,genres,svd_predicted_rating,svd_rank,pmf_predicted_rating,pmf_rank
+527,Schindler's List (1993),Drama|War,5.0,1.0,,
+745,"Close Shave, A (1995)",Animation|Comedy|Thriller,5.0,2.0,,
+858,"Godfather, The (1972)",Action|Crime|Drama,5.0,3.0,,
+922,Sunset Blvd. (a.k.a. Sunset Boulevard) (1950),Film-Noir,5.0,4.0,,
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,5.0,5.0,,
+1178,Paths of Glory (1957),Drama|War,5.0,6.0,,
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,5.0,7.0,,
+2028,Saving Private Ryan (1998),Action|Drama|War,5.0,8.0,,
+2503,"Apple, The (Sib) (1998)",Drama,5.0,9.0,5.0,7.0
+2762,"Sixth Sense, The (1999)",Thriller,5.0,10.0,,
+53,Lamerica (1994),Drama,,,5.0,1.0
+557,Mamma Roma (1962),Drama,,,5.0,2.0
+649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,5.0,3.0
+1002,Ed's Next Move (1996),Comedy,,,5.0,4.0
+1423,Hearts and Minds (1996),Drama,,,5.0,5.0
+2351,Nights of Cabiria (Le Notti di Cabiria) (1957),Drama,,,5.0,6.0
+2905,Sanjuro (1962),Action|Adventure,,,5.0,8.0
+3134,"Grand Illusion (Grande illusion, La) (1937)",Drama|War,,,5.0,9.0
+3338,For All Mankind (1989),Documentary,,,5.0,10.0

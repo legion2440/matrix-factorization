@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.streamlit/
+*.log
+data/ml-1m.zip
+data/ml-1m/
+reports/svd_predictions.npy
+processed/user_item_matrix.csv

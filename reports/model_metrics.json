@@ -1,0 +1,32 @@
+{
+  "random_state": 42,
+  "split": {
+    "train_ratio": 0.7,
+    "validation_ratio": 0.15,
+    "test_ratio": 0.15,
+    "actual_counts": {
+      "train": 705806,
+      "validation": 147201,
+      "test": 147202
+    }
+  },
+  "SVD_MSE": 0.79351785357141,
+  "SVD_RMSE": 0.890796190815503,
+  "PMF_MSE": 0.7155588346931211,
+  "PMF_RMSE": 0.84590710760291,
+  "PMF_vs_SVD_improvement_%": 5.039209156417485,
+  "SVD_target_met": true,
+  "PMF_target_met": true,
+  "improvement_target_met": true,
+  "svd_best_params": {
+    "n_factors": 20,
+    "item_bias_regularization": 5.0
+  },
+  "pmf_best_params": {
+    "n_factors": 96,
+    "learning_rate": 0.006,
+    "factor_regularization": 0.06,
+    "bias_regularization": 0.02,
+    "selected_epoch": 45
+  }
+}

@@ -1,0 +1,18 @@
+movie_id,title,genres,svd_predicted_rating,svd_rank,pmf_predicted_rating,pmf_rank
+1,Toy Story (1995),Animation|Children's|Comedy,5.0,1.0,5.0,1.0
+28,Persuasion (1995),Romance,5.0,2.0,,
+29,"City of Lost Children, The (1995)",Adventure|Sci-Fi,5.0,3.0,,
+47,Seven (Se7en) (1995),Crime|Thriller,5.0,4.0,,
+50,"Usual Suspects, The (1995)",Crime|Thriller,5.0,5.0,5.0,2.0
+53,Lamerica (1994),Drama,5.0,6.0,5.0,3.0
+58,"Postino, Il (The Postman) (1994)",Drama|Romance,5.0,7.0,,
+116,Anne Frank Remembered (1995),Documentary,5.0,8.0,,
+150,Apollo 13 (1995),Drama,5.0,9.0,,
+214,Before the Rain (Pred dozhdot) (1994),Drama,5.0,10.0,,
+128,Jupiter's Wife (1994),Documentary,,,5.0,4.0
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,,,5.0,5.0
+318,"Shawshank Redemption, The (1994)",Drama,,,5.0,6.0
+527,Schindler's List (1993),Drama|War,,,5.0,7.0
+649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,5.0,8.0
+669,Aparajito (1956),Drama,,,5.0,9.0
+720,Wallace & Gromit: The Best of Aardman Animation (1996),Animation,,,5.0,10.0

@@ -1,0 +1,20 @@
+[
+  {
+    "quantile": 0.25,
+    "target_train_count": 32.0,
+    "user_id": 91,
+    "train_ratings": 32
+  },
+  {
+    "quantile": 0.5,
+    "target_train_count": 68.0,
+    "user_id": 40,
+    "train_ratings": 68
+  },
+  {
+    "quantile": 0.75,
+    "target_train_count": 146.0,
+    "user_id": 1186,
+    "train_ratings": 146
+  }
+]

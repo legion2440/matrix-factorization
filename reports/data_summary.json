@@ -1,0 +1,23 @@
+{
+  "n_users": 6040,
+  "n_movies": 3883,
+  "n_ratings": 1000209,
+  "rating_distribution": {
+    "1": 56174,
+    "2": 107557,
+    "3": 261197,
+    "4": 348971,
+    "5": 226310
+  },
+  "user_interactions": {
+    "min": 20,
+    "median": 96.0,
+    "max": 2314
+  },
+  "movie_interactions": {
+    "min": 1,
+    "median": 123.5,
+    "max": 3428
+  },
+  "matrix_sparsity": 0.9573532020200125
+}
