@@ -1,16 +1,16 @@
 movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
-2905,Sanjuro (1962),Action|Adventure,5.4978843,5.0,1.0,5.296995,5.0,2.0
-318,"Shawshank Redemption, The (1994)",Drama,5.469182,5.0,2.0,5.2947874,5.0,3.0
-1148,"Wrong Trousers, The (1993)",Animation|Comedy,5.4534817,5.0,3.0,5.213313,5.0,7.0
+2905,Sanjuro (1962),Action|Adventure,5.4978843,5.0,1.0,5.3024015,5.0,3.0
+318,"Shawshank Redemption, The (1994)",Drama,5.469182,5.0,2.0,5.305529,5.0,2.0
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,5.4534817,5.0,3.0,5.170628,5.0,10.0
 50,"Usual Suspects, The (1995)",Crime|Thriller,5.450618,5.0,4.0,,,
 2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,5.4494734,5.0,5.0,,,
 745,"Close Shave, A (1995)",Animation|Comedy|Thriller,5.445372,5.0,6.0,,,
 858,"Godfather, The (1972)",Action|Crime|Drama,5.4041424,5.0,7.0,,,
-2762,"Sixth Sense, The (1999)",Thriller,5.401517,5.0,8.0,5.2053094,5.0,8.0
+2762,"Sixth Sense, The (1999)",Thriller,5.401517,5.0,8.0,5.232602,5.0,6.0
 2571,"Matrix, The (1999)",Action|Sci-Fi|Thriller,5.3942585,5.0,9.0,,,
-527,Schindler's List (1993),Drama|War,5.3864274,5.0,10.0,5.2673087,5.0,5.0
-2503,"Apple, The (Sib) (1998)",Drama,,,,5.3061757,5.0,1.0
-1198,Raiders of the Lost Ark (1981),Action|Adventure,,,,5.2945685,5.0,4.0
-260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,,,,5.2172318,5.0,6.0
-649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,,5.1798854,5.0,9.0
-904,Rear Window (1954),Mystery|Thriller,,,,5.150185,5.0,10.0
+527,Schindler's List (1993),Drama|War,5.3864274,5.0,10.0,5.2234917,5.0,7.0
+1198,Raiders of the Lost Ark (1981),Action|Adventure,,,,5.3628,5.0,1.0
+2503,"Apple, The (Sib) (1998)",Drama,,,,5.2986417,5.0,4.0
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,,,,5.235212,5.0,5.0
+1207,To Kill a Mockingbird (1962),Drama,,,,5.18886,5.0,8.0
+2197,Firelight (1997),Drama,,,,5.1742616,5.0,9.0

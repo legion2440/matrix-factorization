@@ -38,43 +38,20 @@ from utils.split import deterministic_user_split
 RANDOM_STATE = 42
 SVD_GRID = [5, 10, 20, 40, 60]
 SVD_ITEM_BIAS_REGULARIZATION_GRID = [0.0, 5.0, 10.0, 20.0, 40.0, 80.0]
+PMF_FACTOR_GRID = [96, 112, 128]
+PMF_FACTOR_REGULARIZATION_GRID = [0.05, 0.06, 0.07]
+PMF_TUNING_EPOCHS = 70
+PMF_TUNING_PATIENCE = 8
+PMF_TUNING_MIN_DELTA = 5e-5
 PMF_GRID = [
     {
-        "n_factors": 48,
-        "learning_rate": 0.008,
-        "factor_regularization": 0.04,
-        "bias_regularization": 0.02,
-    },
-    {
-        "n_factors": 64,
-        "learning_rate": 0.008,
-        "factor_regularization": 0.05,
-        "bias_regularization": 0.02,
-    },
-    {
-        "n_factors": 64,
+        "n_factors": n_factors,
         "learning_rate": 0.006,
-        "factor_regularization": 0.04,
+        "factor_regularization": factor_regularization,
         "bias_regularization": 0.02,
-    },
-    {
-        "n_factors": 64,
-        "learning_rate": 0.006,
-        "factor_regularization": 0.06,
-        "bias_regularization": 0.02,
-    },
-    {
-        "n_factors": 80,
-        "learning_rate": 0.006,
-        "factor_regularization": 0.05,
-        "bias_regularization": 0.02,
-    },
-    {
-        "n_factors": 96,
-        "learning_rate": 0.006,
-        "factor_regularization": 0.06,
-        "bias_regularization": 0.02,
-    },
+    }
+    for n_factors in PMF_FACTOR_GRID
+    for factor_regularization in PMF_FACTOR_REGULARIZATION_GRID
 ]
 
 
@@ -173,9 +150,9 @@ def _tune_pmf(
         model = PMFModel(
             n_users=n_users,
             n_items=n_items,
-            epochs=45,
-            patience=6,
-            min_delta=5e-5,
+            epochs=PMF_TUNING_EPOCHS,
+            patience=PMF_TUNING_PATIENCE,
+            min_delta=PMF_TUNING_MIN_DELTA,
             random_state=RANDOM_STATE,
             **params,
         ).fit(
@@ -192,23 +169,86 @@ def _tune_pmf(
             "validation_rmse": float(model.best_validation_rmse or np.inf),
             "epochs_run": len(model.history),
             "seconds": round(time.perf_counter() - started, 3),
+            "hit_epoch_cap": int(model.best_epoch or len(model.history))
+            == PMF_TUNING_EPOCHS,
+            "hit_factor_boundary": int(params["n_factors"])
+            == max(PMF_FACTOR_GRID),
         }
         results.append(result)
         print(
             f"PMF result: epoch={result['best_epoch']}, "
             f"validation RMSE={result['validation_rmse']:.6f}"
         )
-        if best_result is None or (
-            result["validation_rmse"],
-            result["n_factors"],
-        ) < (
-            best_result["validation_rmse"],
-            best_result["n_factors"],
+        if best_result is None or _pmf_result_sort_key(result) < _pmf_result_sort_key(
+            best_result
         ):
             best_result = result
             best_model = model
     assert best_result is not None and best_model is not None
     return best_result, results, best_model.history
+
+
+def _pmf_result_sort_key(result: dict[str, object]) -> tuple[float, int, float, int]:
+    return (
+        float(result["validation_rmse"]),
+        int(result["n_factors"]),
+        -float(result["factor_regularization"]),
+        int(result["best_epoch"]),
+    )
+
+
+def _pmf_search_diagnostics(best_result: dict[str, object]) -> dict[str, object]:
+    return {
+        "selected_at_factor_boundary": int(best_result["n_factors"])
+        == max(PMF_FACTOR_GRID),
+        "selected_at_epoch_boundary": int(best_result["best_epoch"])
+        == PMF_TUNING_EPOCHS,
+        "selected_early_stopping_triggered": int(best_result["epochs_run"])
+        < PMF_TUNING_EPOCHS,
+        "search_max_factors": max(PMF_FACTOR_GRID),
+        "search_max_epochs": PMF_TUNING_EPOCHS,
+    }
+
+
+def _fit_final_pmf(
+    combined_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_users: int,
+    n_items: int,
+    best_result: dict[str, object],
+) -> PMFModel:
+    model = PMFModel(
+        n_users=n_users,
+        n_items=n_items,
+        n_factors=int(best_result["n_factors"]),
+        learning_rate=float(best_result["learning_rate"]),
+        factor_regularization=float(best_result["factor_regularization"]),
+        bias_regularization=float(best_result["bias_regularization"]),
+        epochs=int(best_result["best_epoch"]),
+        patience=int(best_result["best_epoch"]) + 1,
+        random_state=RANDOM_STATE,
+    )
+    return model.fit(*combined_arrays)
+
+
+def _add_pmf_search_metadata(
+    metadata_path: Path,
+    best_result: dict[str, object],
+    diagnostics: dict[str, object],
+) -> None:
+    with metadata_path.open(encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    metadata["training_mode"] = "final_refit_train_plus_validation_without_holdout"
+    metadata["selected_validation_result"] = {
+        "n_factors": int(best_result["n_factors"]),
+        "learning_rate": float(best_result["learning_rate"]),
+        "factor_regularization": float(best_result["factor_regularization"]),
+        "bias_regularization": float(best_result["bias_regularization"]),
+        "best_epoch": int(best_result["best_epoch"]),
+        "validation_rmse": float(best_result["validation_rmse"]),
+        "epochs_run": int(best_result["epochs_run"]),
+    }
+    metadata["search_diagnostics"] = diagnostics
+    save_json(metadata_path, metadata)
 
 
 def main() -> None:
@@ -284,6 +324,7 @@ def main() -> None:
     )
     save_json(reports_dir / "pmf_tuning.json", pmf_results)
     plot_convergence(pmf_history, reports_dir / "pmf_convergence.png")
+    pmf_search_diagnostics = _pmf_search_diagnostics(pmf_best)
 
     train_validation = pd.concat(
         [split.train, split.validation], ignore_index=True
@@ -322,15 +363,18 @@ def main() -> None:
             "bias_regularization",
         )
     }
-    final_pmf = PMFModel(
-        n_users=len(user_to_index),
-        n_items=len(movie_to_index),
-        epochs=int(pmf_best["best_epoch"]),
-        patience=int(pmf_best["best_epoch"]) + 1,
-        random_state=RANDOM_STATE,
-        **final_pmf_params,
-    ).fit(*combined_arrays)
+    final_pmf = _fit_final_pmf(
+        combined_arrays,
+        len(user_to_index),
+        len(movie_to_index),
+        pmf_best,
+    )
     final_pmf.save(pmf_dir)
+    _add_pmf_search_metadata(
+        pmf_dir / "metadata.json",
+        pmf_best,
+        pmf_search_diagnostics,
+    )
 
     test_users, test_movies, test_actual = _indexed(
         split.test, user_to_index, movie_to_index
@@ -372,7 +416,9 @@ def main() -> None:
         "pmf_best_params": {
             **final_pmf_params,
             "selected_epoch": int(pmf_best["best_epoch"]),
+            "validation_rmse": float(pmf_best["validation_rmse"]),
         },
+        "pmf_search_diagnostics": pmf_search_diagnostics,
     }
     save_json(reports_dir / "model_metrics.json", metrics)
 

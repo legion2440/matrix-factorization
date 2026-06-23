@@ -128,10 +128,12 @@ def validate() -> list[str]:
             evaluated_users = json.load(handle)
         with (root / "reports" / "svd_metadata.json").open(encoding="utf-8") as handle:
             svd_metadata = json.load(handle)
+        with (root / "reports" / "pmf_tuning.json").open(encoding="utf-8") as handle:
+            pmf_tuning = json.load(handle)
         with (root / "reports" / "pmf_factors" / "metadata.json").open(
             encoding="utf-8"
         ) as handle:
-            json.load(handle)
+            pmf_metadata = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"Invalid JSON artifact: {exc}")
         return errors
@@ -144,6 +146,7 @@ def validate() -> list[str]:
         "PMF_vs_SVD_improvement_%",
         "svd_best_params",
         "pmf_best_params",
+        "pmf_search_diagnostics",
     }
     if required_metric_keys - set(metrics):
         errors.append("model_metrics.json has an incomplete schema")
@@ -153,6 +156,76 @@ def validate() -> list[str]:
         errors.append("PMF RMSE target not met")
     if metrics.get("PMF_vs_SVD_improvement_%", -np.inf) < 5.0:
         errors.append("PMF improvement target not met")
+
+    required_tuning_fields = {
+        "n_factors",
+        "learning_rate",
+        "factor_regularization",
+        "bias_regularization",
+        "best_epoch",
+        "validation_rmse",
+        "epochs_run",
+        "seconds",
+        "hit_epoch_cap",
+        "hit_factor_boundary",
+    }
+    if not isinstance(pmf_tuning, list) or len(pmf_tuning) != 9:
+        errors.append("PMF tuning artifact must contain exactly 9 configurations")
+    else:
+        combinations = {
+            (row.get("n_factors"), row.get("factor_regularization"))
+            for row in pmf_tuning
+        }
+        expected_combinations = {
+            (factors, regularization)
+            for factors in (96, 112, 128)
+            for regularization in (0.05, 0.06, 0.07)
+        }
+        if combinations != expected_combinations:
+            errors.append("PMF tuning artifact has an unexpected search grid")
+        for row in pmf_tuning:
+            if required_tuning_fields - set(row):
+                errors.append("PMF tuning row has an incomplete diagnostic schema")
+                break
+            if row["hit_epoch_cap"] != (row["best_epoch"] == 70):
+                errors.append("PMF hit_epoch_cap diagnostic is inconsistent")
+                break
+            if row["hit_factor_boundary"] != (row["n_factors"] == 128):
+                errors.append("PMF hit_factor_boundary diagnostic is inconsistent")
+                break
+
+    diagnostics = metrics.get("pmf_search_diagnostics", {})
+    required_diagnostics = {
+        "selected_at_factor_boundary",
+        "selected_at_epoch_boundary",
+        "selected_early_stopping_triggered",
+        "search_max_factors",
+        "search_max_epochs",
+    }
+    if required_diagnostics - set(diagnostics):
+        errors.append("PMF search diagnostics are missing from model metrics")
+    elif diagnostics.get("search_max_factors") != 128 or diagnostics.get(
+        "search_max_epochs"
+    ) != 70:
+        errors.append("PMF search boundary diagnostics are invalid")
+
+    if pmf_metadata.get("search_diagnostics") != diagnostics:
+        errors.append("PMF factor metadata search diagnostics do not match metrics")
+    if (
+        pmf_metadata.get("training_mode")
+        != "final_refit_train_plus_validation_without_holdout"
+    ):
+        errors.append("PMF metadata does not declare validation-free final refit")
+    selected_epoch = metrics.get("pmf_best_params", {}).get("selected_epoch")
+    if pmf_metadata.get("config", {}).get("epochs") != selected_epoch:
+        errors.append("PMF final refit epochs do not match selected best_epoch")
+    if len(pmf_metadata.get("history", [])) != selected_epoch:
+        errors.append("PMF final refit history length does not match selected best_epoch")
+    if any(
+        row.get("validation_rmse") is not None
+        for row in pmf_metadata.get("history", [])
+    ):
+        errors.append("PMF final refit unexpectedly used validation data")
 
     user_to_index, movie_to_index, index_to_user, index_to_movie = load_mappings(
         root / "processed" / "mappings"

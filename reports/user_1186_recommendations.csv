@@ -1,5 +1,5 @@
 movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
-2905,Sanjuro (1962),Action|Adventure,5.15662,5.0,1.0,5.021847,5.0,8.0
+2905,Sanjuro (1962),Action|Adventure,5.15662,5.0,1.0,,,
 2028,Saving Private Ryan (1998),Action|Drama|War,5.099514,5.0,2.0,,,
 527,Schindler's List (1993),Drama|War,5.09663,5.0,3.0,,,
 1148,"Wrong Trousers, The (1993)",Animation|Comedy,5.094352,5.0,4.0,,,
@@ -7,12 +7,14 @@ movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_rankin
 858,"Godfather, The (1972)",Action|Crime|Drama,5.058954,5.0,6.0,,,
 2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,5.040205,5.0,7.0,,,
 922,Sunset Blvd. (a.k.a. Sunset Boulevard) (1950),Film-Noir,5.034382,5.0,8.0,,,
-3338,For All Mankind (1989),Documentary,5.029319,5.0,9.0,5.015027,5.0,10.0
-2503,"Apple, The (Sib) (1998)",Drama,5.028334,5.0,10.0,5.3277087,5.0,1.0
-53,Lamerica (1994),Drama,,,,5.131841,5.0,2.0
-649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,,5.1206336,5.0,3.0
-1423,Hearts and Minds (1996),Drama,,,,5.1169214,5.0,4.0
-557,Mamma Roma (1962),Drama,,,,5.115591,5.0,5.0
-1002,Ed's Next Move (1996),Comedy,,,,5.0792446,5.0,6.0
-2351,Nights of Cabiria (Le Notti di Cabiria) (1957),Drama,,,,5.0412784,5.0,7.0
-3134,"Grand Illusion (Grande illusion, La) (1937)",Drama|War,,,,5.0169654,5.0,9.0
+3338,For All Mankind (1989),Documentary,5.029319,5.0,9.0,,,
+2503,"Apple, The (Sib) (1998)",Drama,5.028334,5.0,10.0,5.308103,5.0,1.0
+1423,Hearts and Minds (1996),Drama,,,,5.159487,5.0,2.0
+557,Mamma Roma (1962),Drama,,,,5.148185,5.0,3.0
+53,Lamerica (1994),Drama,,,,5.143554,5.0,4.0
+649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,,5.111406,5.0,5.0
+1002,Ed's Next Move (1996),Comedy,,,,5.096032,5.0,6.0
+3910,Dancer in the Dark (2000),Drama|Musical,,,,5.0444474,5.0,7.0
+2931,Time of the Gypsies (Dom za vesanje) (1989),Drama,,,,5.0429654,5.0,8.0
+1218,"Killer, The (Die xue shuang xiong) (1989)",Action|Thriller,,,,5.037144,5.0,9.0
+3245,I Am Cuba (Soy Cuba/Ya Kuba) (1964),Drama,,,,5.032018,5.0,10.0
