@@ -28,6 +28,8 @@ def load_application_resources() -> dict[str, object]:
         ROOT / "reports" / "svd_predictions.npy",
         ROOT / "reports" / "pmf_factors" / "metadata.json",
         ROOT / "reports" / "model_metrics.json",
+        ROOT / "reports" / "ranking_metrics.json",
+        ROOT / "reports" / "ranking_protocol.json",
         ROOT / "reports" / "evaluated_users.json",
         ROOT / "reports" / "pmf_factor_interpretation.csv",
         ROOT / "reports" / "pmf_factor_genre_profiles.csv",
@@ -50,6 +52,10 @@ def load_application_resources() -> dict[str, object]:
     pmf = PMFModel.load(ROOT / "reports" / "pmf_factors")
     with (ROOT / "reports" / "model_metrics.json").open(encoding="utf-8") as handle:
         metrics = json.load(handle)
+    with (ROOT / "reports" / "ranking_metrics.json").open(encoding="utf-8") as handle:
+        ranking_metrics = json.load(handle)
+    with (ROOT / "reports" / "ranking_protocol.json").open(encoding="utf-8") as handle:
+        ranking_protocol = json.load(handle)
     with (ROOT / "reports" / "evaluated_users.json").open(encoding="utf-8") as handle:
         evaluated_users = json.load(handle)
 
@@ -78,6 +84,8 @@ def load_application_resources() -> dict[str, object]:
             data.ratings,
         ),
         "metrics": metrics,
+        "ranking_metrics": ranking_metrics,
+        "ranking_protocol": ranking_protocol,
         "evaluated_users": evaluated_users,
         "factor_interpretation": pd.read_csv(
             ROOT / "reports" / "pmf_factor_interpretation.csv"
@@ -109,14 +117,29 @@ def _load_user_explanations(user_id: int) -> pd.DataFrame | None:
     return pd.read_csv(path)
 
 
-def _audit_user_label(record: dict[str, object]) -> str:
+def _load_user_ranking_case(user_id: int) -> pd.DataFrame | None:
+    path = ROOT / "reports" / f"user_{user_id}_ranking_case.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
+def _evaluation_user_label(record: dict[str, object]) -> str:
     return f"{record['role']} - user {record['user_id']}"
+
+
+def _sync_evaluation_profile_user_id() -> None:
+    selected = st.session_state.get("evaluation_profile")
+    if isinstance(selected, dict) and "user_id" in selected:
+        st.session_state["user_id_input"] = str(selected["user_id"])
 
 
 def main() -> None:
     st.set_page_config(page_title="MovieLens Matrix Factorization", layout="wide")
     st.title("MovieLens 1M recommender")
-    st.caption("Baseline CF, truncated SVD, and locally implemented biased PMF")
+    st.caption(
+        "Bias baseline, residualized item-kNN, truncated SVD, and biased PMF"
+    )
 
     try:
         resources = load_application_resources()
@@ -127,27 +150,33 @@ def main() -> None:
     metrics = resources["metrics"]
     metric_columns = st.columns(4)
     metric_columns[0].metric(
-        "Baseline CF RMSE", f"{metrics['Baseline_CF_RMSE']:.4f}"
+        "Bias baseline RMSE", f"{metrics['BiasBaseline_RMSE']:.4f}"
     )
-    metric_columns[1].metric("SVD RMSE", f"{metrics['SVD_RMSE']:.4f}")
-    metric_columns[2].metric("PMF RMSE", f"{metrics['PMF_RMSE']:.4f}")
-    metric_columns[3].metric(
-        "PMF vs baseline", f"{metrics['PMF_vs_Baseline_improvement_%']:.2f}%"
+    metric_columns[1].metric(
+        "Item-kNN RMSE", f"{metrics['ItemKNN_RMSE']:.4f}"
     )
+    metric_columns[2].metric("SVD RMSE", f"{metrics['SVD_RMSE']:.4f}")
+    metric_columns[3].metric("PMF RMSE", f"{metrics['PMF_RMSE']:.4f}")
 
-    user_ids = resources["index_to_user"].astype(int).tolist()
     evaluated_users = resources["evaluated_users"]
-    audit_user_ids = [int(row["user_id"]) for row in evaluated_users]
+    evaluation_user_ids = [int(row["user_id"]) for row in evaluated_users]
+    if "evaluation_profile" not in st.session_state:
+        st.session_state["evaluation_profile"] = evaluated_users[0]
+    if "user_id_input" not in st.session_state:
+        st.session_state["user_id_input"] = str(
+            st.session_state["evaluation_profile"]["user_id"]
+        )
     controls = st.columns([2, 2, 1])
-    selected_audit = controls[0].selectbox(
-        "Audit user shortcut",
+    controls[0].selectbox(
+        "Evaluation profile shortcut",
         evaluated_users,
-        format_func=_audit_user_label,
-        index=0,
+        format_func=_evaluation_user_label,
+        key="evaluation_profile",
+        on_change=_sync_evaluation_profile_user_id,
     )
     manual_user_id = controls[1].text_input(
         "User ID input",
-        value=str(selected_audit["user_id"]),
+        key="user_id_input",
     )
     top_n = controls[2].slider("Top N", min_value=5, max_value=25, value=10)
     try:
@@ -260,8 +289,9 @@ def main() -> None:
         explanations = _load_user_explanations(user_id)
         if explanations is None:
             st.info(
-                "Saved local explanation artifacts are generated for the three audit users: "
-                + ", ".join(str(value) for value in audit_user_ids)
+                "Saved local explanation artifacts are available for the three "
+                "evaluation profiles: "
+                + ", ".join(str(value) for value in evaluation_user_ids)
             )
         else:
             st.subheader("Local PMF explanation table")
@@ -317,13 +347,18 @@ def main() -> None:
             _artifact_image(f"reports/user_{user_id}_explanation.png")
 
     with tabs[2]:
-        st.subheader("Test metrics")
+        st.subheader("Rating prediction")
         metric_table = pd.DataFrame(
             [
                 {
-                    "model": "Baseline CF",
-                    "mse": metrics["Baseline_CF_MSE"],
-                    "rmse": metrics["Baseline_CF_RMSE"],
+                    "model": "Bias baseline",
+                    "mse": metrics["BiasBaseline_MSE"],
+                    "rmse": metrics["BiasBaseline_RMSE"],
+                },
+                {
+                    "model": "Item-kNN",
+                    "mse": metrics["ItemKNN_MSE"],
+                    "rmse": metrics["ItemKNN_RMSE"],
                 },
                 {"model": "SVD", "mse": metrics["SVD_MSE"], "rmse": metrics["SVD_RMSE"]},
                 {"model": "PMF", "mse": metrics["PMF_MSE"], "rmse": metrics["PMF_RMSE"]},
@@ -340,6 +375,64 @@ def main() -> None:
             _artifact_image("reports/pmf_convergence.png")
         with col2:
             _artifact_image("reports/predicted_vs_actual.png")
+
+        st.divider()
+        st.subheader("Top-K next-positive recovery")
+        st.caption(
+            resources["ranking_protocol"]["protocol"]
+            + ". Candidates are the full supported catalog minus the user's "
+            "strict temporal-prefix history; unseen movies are not treated as "
+            "observed negatives."
+        )
+        ranking_table = pd.DataFrame(
+            [
+                {
+                    "model": model_name,
+                    "HitRate@10": values["HitRate@10"],
+                    "NDCG@10": values["NDCG@10"],
+                    "MRR@10": values["MRR@10"],
+                    "mean_target_rank": values["mean_target_rank"],
+                    "median_target_rank": values["median_target_rank"],
+                }
+                for model_name, values in resources["ranking_metrics"]["models"].items()
+            ]
+        )
+        st.dataframe(
+            _format_frame(
+                ranking_table,
+                {
+                    "HitRate@10": "{:.4f}",
+                    "NDCG@10": "{:.4f}",
+                    "MRR@10": "{:.4f}",
+                    "mean_target_rank": "{:.2f}",
+                    "median_target_rank": "{:.1f}",
+                },
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
+        _artifact_image("reports/ranking_comparison.png")
+
+        ranking_case = _load_user_ranking_case(user_id)
+        if ranking_case is not None:
+            st.subheader("Held-out target case")
+            st.dataframe(
+                _format_frame(
+                    ranking_case,
+                    {
+                        "target_rating": "{:.1f}",
+                        "bias_raw_target_score": "{:.4f}",
+                        "item_knn_raw_target_score": "{:.4f}",
+                        "svd_raw_target_score": "{:.4f}",
+                        "pmf_raw_target_score": "{:.4f}",
+                        "nearest_known_rating": "{:.1f}",
+                        "nearest_known_similarity": "{:.4f}",
+                    },
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+            _artifact_image(f"reports/user_{user_id}_ranking_case.png")
 
     with tabs[3]:
         st.subheader("High-variance PMF factors")

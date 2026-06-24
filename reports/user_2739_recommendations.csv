@@ -1,0 +1,16 @@
+movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
+260,Star Wars: Episode IV - A New Hope (1977),Action|Adventure|Fantasy|Sci-Fi,4.4387174,4.4387174,1.0,4.386113,4.386113,4.0
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,4.318413,4.318413,2.0,4.236184,4.236184,10.0
+1198,Raiders of the Lost Ark (1981),Action|Adventure,4.294884,4.294884,3.0,4.463041,4.463041,1.0
+50,"Usual Suspects, The (1995)",Crime|Thriller,4.243263,4.243263,4.0,,,
+318,"Shawshank Redemption, The (1994)",Drama,4.2422066,4.2422066,5.0,4.420349,4.420349,2.0
+2905,Sanjuro (1962),Action|Adventure,4.239038,4.239038,6.0,4.415621,4.415621,3.0
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,4.209668,4.209668,7.0,,,
+745,"Close Shave, A (1995)",Animation|Comedy|Thriller,4.203445,4.203445,8.0,,,
+858,"Godfather, The (1972)",Action|Crime|Drama,4.1933174,4.1933174,9.0,,,
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,4.192632,4.192632,10.0,,,
+2503,"Apple, The (Sib) (1998)",Drama,,,,4.374442,4.374442,5.0
+527,Schindler's List (1993),Drama|War,,,,4.355837,4.355837,6.0
+2028,Saving Private Ryan (1998),Action|Drama|War,,,,4.301835,4.301835,7.0
+649,Cold Fever (Á köldum klaka) (1994),Comedy|Drama,,,,4.2982597,4.2982597,8.0
+2197,Firelight (1997),Drama,,,,4.259399,4.259399,9.0

@@ -8,10 +8,11 @@ from models.pmf_model import PMFModel
 from utils.interpretability import (
     build_local_pmf_explanations,
     build_pmf_movie_similarities,
+    build_ranking_case_explanation,
     cosine_similarity,
     decompose_pmf_score,
     nearest_known_liked_movie,
-    select_audit_users,
+    select_evaluation_users,
 )
 
 
@@ -162,7 +163,70 @@ def test_local_explanations_reconstruct_raw_scores_and_nearest_liked_movie():
     assert explanations.loc[0, "nearest_known_movie_id"] in {20, 40}
 
 
-def test_audit_user_selection_roles_support_and_determinism():
+def test_ranking_case_reconstructs_ranking_pmf_target_score():
+    pmf = _fake_pmf()
+    raw_score = float(pmf.predict_pairs(np.array([0]), np.array([0]), clip=False)[0])
+    ranking_row = pd.Series(
+        {
+            "user_id": 1,
+            "target_movie_id": 10,
+            "target_title": "A",
+            "target_genres": "Action|Drama",
+            "target_rating": 5.0,
+            "target_timestamp": 100,
+            "prior_history_count": 2,
+            "candidate_count": 3,
+            "bias_target_rank": 3,
+            "item_knn_target_rank": 2,
+            "svd_target_rank": 2,
+            "pmf_target_rank": 1,
+            "bias_raw_target_score": 3.0,
+            "item_knn_raw_target_score": 3.5,
+            "svd_raw_target_score": 4.0,
+            "pmf_raw_target_score": raw_score,
+            "bias_hit_at_5": True,
+            "bias_hit_at_10": True,
+            "item_knn_hit_at_5": True,
+            "item_knn_hit_at_10": True,
+            "svd_hit_at_5": True,
+            "svd_hit_at_10": True,
+            "pmf_hit_at_5": True,
+            "pmf_hit_at_10": True,
+        }
+    )
+    ranking_row = ranking_row.drop(labels=["user_id"])
+    ranking_row.name = 1
+    ranking_train = pd.DataFrame(
+        {
+            "user_id": [1, 1],
+            "movie_id": [20, 40],
+            "rating": [5.0, 4.0],
+            "timestamp": [10, 20],
+        }
+    )
+    selection = {
+        "user_id": 1,
+        "role": "train_profile_accurate",
+        "ranking_case": "pmf_hit_at_10",
+    }
+
+    case = build_ranking_case_explanation(
+        selection,
+        ranking_row,
+        ranking_train,
+        pmf,
+        {1: 0, 2: 1},
+        {10: 0, 20: 1, 30: 2, 40: 3},
+        _movies(),
+    )
+
+    assert len(case) == 1
+    assert abs(float(case.loc[0, "pmf_reconstruction_error"])) <= 1e-6
+    assert int(case.loc[0, "pmf_target_rank"]) == 1
+    assert int(case.loc[0, "nearest_known_movie_id"]) in {20, 40}
+
+
+def test_evaluation_user_selection_roles_support_and_determinism():
     train = pd.DataFrame(
         {
             "user_id": [1, 2, 3, 4, 5],
@@ -184,9 +248,42 @@ def test_audit_user_selection_roles_support_and_determinism():
             }
         )
     test = pd.DataFrame(rows)
+    ranking = pd.DataFrame(
+        {
+            "user_id": [1, 2, 3, 4, 5],
+            "target_movie_id": [30, 31, 32, 33, 34],
+            "target_title": ["A", "B", "C", "D", "E"],
+            "target_rating": [5.0, 4.0, 5.0, 4.0, 5.0],
+            "target_timestamp": [10, 20, 30, 40, 50],
+            "prior_history_count": [20, 21, 22, 23, 24],
+            "candidate_count": [100] * 5,
+            "bias_target_rank": [5, 6, 7, 8, 9],
+            "item_knn_target_rank": [4, 5, 6, 7, 8],
+            "svd_target_rank": [3, 4, 5, 6, 7],
+            "pmf_target_rank": [1, 5, 9, 20, 40],
+            "bias_hit_at_10": [True] * 5,
+            "item_knn_hit_at_10": [True] * 5,
+            "svd_hit_at_10": [True] * 5,
+            "pmf_hit_at_10": [True, True, True, False, False],
+        }
+    )
 
-    first = select_audit_users(train, validation, test, min_train_ratings=1, min_test_ratings=1)
-    second = select_audit_users(train, validation, test, min_train_ratings=1, min_test_ratings=1)
+    first = select_evaluation_users(
+        train,
+        validation,
+        test,
+        ranking,
+        min_train_ratings=1,
+        min_test_ratings=1,
+    )
+    second = select_evaluation_users(
+        train,
+        validation,
+        test,
+        ranking,
+        min_train_ratings=1,
+        min_test_ratings=1,
+    )
 
     assert first == second
     assert {row["role"] for row in first} == {
@@ -196,7 +293,8 @@ def test_audit_user_selection_roles_support_and_determinism():
     }
     assert len({row["user_id"] for row in first}) == 3
     by_role = {row["role"]: row for row in first}
-    assert (
-        by_role["train_profile_accurate"]["pmf_test_rmse"]
-        < by_role["train_profile_less_accurate"]["pmf_test_rmse"]
-    )
+    assert by_role["train_profile_accurate"]["pmf_hit_at_10"] is True
+    assert by_role["train_profile_accurate"]["pmf_target_rank"] == 5
+    assert by_role["train_profile_less_accurate"]["pmf_hit_at_10"] is False
+    assert by_role["train_profile_less_accurate"]["pmf_target_rank"] == 20
+    assert by_role["test_case"]["user_id"] == 3

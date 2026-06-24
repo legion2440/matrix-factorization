@@ -1,0 +1,17 @@
+movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
+2905,Sanjuro (1962),Action|Adventure,4.56068,4.56068,1.0,4.520885,4.520885,2.0
+858,"Godfather, The (1972)",Action|Crime|Drama,4.5469656,4.5469656,2.0,4.481902,4.481902,4.0
+50,"Usual Suspects, The (1995)",Crime|Thriller,4.540651,4.540651,3.0,,,
+318,"Shawshank Redemption, The (1994)",Drama,4.5246596,4.5246596,4.0,,,
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,4.5219383,4.5219383,5.0,,,
+745,"Close Shave, A (1995)",Animation|Comedy|Thriller,4.515355,4.515355,6.0,4.4379644,4.4379644,8.0
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,4.507704,4.507704,7.0,,,
+750,Dr. Strangelove or: How I Learned to Stop Worrying and Love the Bomb (1963),Sci-Fi|War,4.486195,4.486195,8.0,4.436143,4.436143,9.0
+922,Sunset Blvd. (a.k.a. Sunset Boulevard) (1950),Film-Noir,4.4702935,4.4702935,9.0,,,
+904,Rear Window (1954),Mystery|Thriller,4.4473214,4.4473214,10.0,,,
+2503,"Apple, The (Sib) (1998)",Drama,,,,4.534943,4.534943,1.0
+3338,For All Mankind (1989),Documentary,,,,4.5154877,4.5154877,3.0
+2858,American Beauty (1999),Comedy|Drama,,,,4.4452996,4.4452996,5.0
+53,Lamerica (1994),Drama,,,,4.4435086,4.4435086,6.0
+3245,I Am Cuba (Soy Cuba/Ya Kuba) (1964),Drama,,,,4.438494,4.438494,7.0
+1423,Hearts and Minds (1996),Drama,,,,4.4323325,4.4323325,10.0

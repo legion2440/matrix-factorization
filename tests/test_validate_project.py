@@ -6,13 +6,16 @@ import pytest
 
 from models.pmf_model import PMFModel
 from scripts.validate_project import (
-    _validate_audit_users_payload,
     _validate_benchmark_metrics,
+    _validate_evaluation_users_payload,
     _validate_explanation_artifact,
     _validate_factor_interpretation,
+    _validate_item_knn_tuning_artifact,
+    _validate_ranking_artifacts,
     _validate_raw_svd_predictions,
     _validate_similarity_artifact,
 )
+from utils.ranking_evaluation import aggregate_ranking_metrics
 
 
 @pytest.mark.parametrize("raw_value", [0.9, 5.1])
@@ -42,24 +45,96 @@ def test_raw_svd_prediction_matrix_preserves_shape_and_finite_checks():
     assert "Raw SVD predictions contain non-finite values" in errors
 
 
-def test_benchmark_metric_validation_rejects_missing_and_too_strong_baseline():
+def test_benchmark_metric_validation_checks_honest_pairwise_flags():
     missing_errors = _validate_benchmark_metrics({"SVD_RMSE": 0.9, "PMF_RMSE": 0.8})
     assert any("missing benchmark fields" in error for error in missing_errors)
 
-    errors = _validate_benchmark_metrics(
-        {
-            "Baseline_CF_MSE": 0.64,
-            "Baseline_CF_RMSE": 0.8,
-            "SVD_RMSE": 0.9,
-            "PMF_RMSE": 0.85,
-            "SVD_vs_Baseline_improvement_%": -12.5,
-            "PMF_vs_Baseline_improvement_%": -6.25,
-            "baseline_best_params": {},
-        }
-    )
+    metrics = {
+        "BiasBaseline_MSE": 1.0,
+        "BiasBaseline_RMSE": 1.0,
+        "ItemKNN_MSE": 0.81,
+        "ItemKNN_RMSE": 0.9,
+        "SVD_MSE": 0.9025,
+        "SVD_RMSE": 0.95,
+        "PMF_MSE": 0.7225,
+        "PMF_RMSE": 0.85,
+        "ItemKNN_vs_BiasBaseline_improvement_%": 10.0,
+        "SVD_vs_BiasBaseline_improvement_%": 5.0,
+        "PMF_vs_BiasBaseline_improvement_%": 15.0,
+        "SVD_vs_ItemKNN_improvement_%": (0.9 - 0.95) / 0.9 * 100.0,
+        "PMF_vs_ItemKNN_improvement_%": (0.9 - 0.85) / 0.9 * 100.0,
+        "PMF_vs_SVD_improvement_%": (0.95 - 0.85) / 0.95 * 100.0,
+        "ItemKNN_beats_BiasBaseline": True,
+        "SVD_beats_BiasBaseline": True,
+        "PMF_beats_BiasBaseline": True,
+        "SVD_beats_ItemKNN": False,
+        "PMF_beats_ItemKNN": True,
+        "bias_baseline_best_params": {},
+        "item_knn_best_params": {},
+    }
+    assert _validate_benchmark_metrics(metrics) == []
 
-    assert "Baseline_CF_RMSE must be greater than SVD_RMSE" in errors
-    assert "Baseline_CF_RMSE must be greater than PMF_RMSE" in errors
+    metrics["SVD_beats_ItemKNN"] = True
+    errors = _validate_benchmark_metrics(metrics)
+    assert "SVD_beats_ItemKNN does not match the stored RMSE values" in errors
+
+
+def test_item_knn_tuning_validator_checks_grid_selection_and_neighbors():
+    results = [
+        {
+            "k": k,
+            "shrinkage": shrinkage,
+            "min_common": 3,
+            "validation_mse": 1.0,
+            "validation_rmse": 1.0 + k / 10000 - shrinkage / 100000,
+        }
+        for k in (20, 40, 80)
+        for shrinkage in (10.0, 50.0, 100.0)
+    ]
+    selected = min(
+        results,
+        key=lambda row: (
+            row["validation_rmse"],
+            row["k"],
+            -row["shrinkage"],
+        ),
+    )
+    payload = {
+        "model": "ItemKNN",
+        "prediction_formula": "x",
+        "similarity_definition": "x",
+        "neighborhood_definition": "x",
+        "neighborhood_ordering": [
+            "absolute shrunk similarity descending",
+            "signed shrunk similarity descending",
+            "movie ID ascending",
+        ],
+        "parameter_grid": {
+            "k": [20, 40, 80],
+            "shrinkage": [10.0, 50.0, 100.0],
+            "min_common": 3,
+        },
+        "selection_metric": "validation_rmse",
+        "selection_tie_break": [],
+        "uses_test_for_tuning": False,
+        "results": results,
+        "selected": selected,
+        "final_refit": {
+            "uses_train_plus_validation": True,
+            "diagnostics": {
+                "similarities_finite": True,
+                "self_neighbor_count": 0,
+                "deterministic_ordering_verified": True,
+                "minimum_common_users": 3,
+            },
+        },
+        "test_evaluation": {"mse": 1.0, "rmse": 1.0},
+    }
+    assert _validate_item_knn_tuning_artifact(payload) == []
+    payload["final_refit"]["diagnostics"]["self_neighbor_count"] = 1
+    assert "item-kNN self-neighbors must be absent" in _validate_item_knn_tuning_artifact(
+        payload
+    )
 
 
 def test_factor_interpretation_validation_rejects_missing_polarity_and_bad_values():
@@ -102,7 +177,7 @@ def test_similarity_validation_rejects_self_match_range_and_sorting():
     assert "Similarity CSV contains values outside [-1, 1]" in errors
 
 
-def test_audit_user_validation_rejects_duplicate_roles_users_and_bad_ordering():
+def test_evaluation_user_validation_rejects_duplicate_roles_users_and_bad_ordering():
     train = pd.DataFrame({"user_id": [1, 2, 3], "movie_id": [1, 1, 1]})
     validation = train.copy()
     test = train.copy()
@@ -139,10 +214,98 @@ def test_audit_user_validation_rejects_duplicate_roles_users_and_bad_ordering():
         },
     ]
 
-    errors = _validate_audit_users_payload(payload, train, validation, test)
+    ranking = pd.DataFrame({"user_id": pd.Series(dtype=int)})
+    errors = _validate_evaluation_users_payload(
+        payload, train, validation, test, ranking
+    )
 
-    assert "Audit user IDs must be unique" in errors
+    assert "Evaluation profile user IDs must be unique" in errors
     assert any("roles must be exactly" in error for error in errors)
+
+
+def test_ranking_validator_reconstructs_full_catalog_metrics_and_strict_prefix():
+    history_rows = [
+        (1, 100 + index, 3.0, index + 1) for index in range(20)
+    ]
+    support_rows = [(user_id, 50, 4.0, 1) for user_id in range(2, 12)]
+    ranking_train = pd.DataFrame(
+        history_rows + support_rows,
+        columns=["user_id", "movie_id", "rating", "timestamp"],
+    )
+    ranking_targets = pd.DataFrame(
+        {
+            "user_id": [1],
+            "movie_id": [50],
+            "rating": [5.0],
+            "timestamp": [30],
+            "prior_history_count": [20],
+            "target_item_support": [10],
+        }
+    )
+    result = {
+        "user_id": 1,
+        "target_movie_id": 50,
+        "target_title": "Target",
+        "target_genres": "Drama",
+        "target_rating": 5.0,
+        "target_timestamp": 30,
+        "prior_history_count": 20,
+        "candidate_count": 1,
+    }
+    for prefix in ("bias", "item_knn", "svd", "pmf"):
+        result[f"{prefix}_target_rank"] = 1
+        result[f"{prefix}_raw_target_score"] = 4.0
+        for cutoff in (5, 10):
+            result[f"{prefix}_hit_at_{cutoff}"] = True
+            result[f"{prefix}_ndcg_at_{cutoff}"] = 1.0
+            result[f"{prefix}_mrr_at_{cutoff}"] = 1.0
+    ranking_results = pd.DataFrame([result])
+    ranking_metrics = aggregate_ranking_metrics(ranking_results)
+    ranking_protocol = {
+        "protocol": "next-positive recovery under temporal leave-one-positive-out",
+        "full_catalog_candidates": True,
+        "sampled_negatives": False,
+        "history_rule": "timestamp < target_timestamp",
+        "min_prior_interactions": 20,
+        "min_target_item_support": 10,
+        "frozen_model_parameters": {
+            "SVD": {
+                "n_factors": 20,
+                "item_bias_regularization": 5.0,
+                "random_state": 42,
+            },
+            "PMF": {
+                "n_factors": 128,
+                "learning_rate": 0.006,
+                "factor_regularization": 0.06,
+                "bias_regularization": 0.02,
+                "epochs": 53,
+                "random_state": 42,
+                "uses_ranking_targets_for_tuning": False,
+            },
+        },
+    }
+
+    assert (
+        _validate_ranking_artifacts(
+            ranking_train,
+            ranking_targets,
+            ranking_results,
+            ranking_metrics,
+            ranking_protocol,
+        )
+        == []
+    )
+
+    ranking_train.loc[len(ranking_train)] = [1, 999, 2.0, 30]
+    errors = _validate_ranking_artifacts(
+        ranking_train,
+        ranking_targets,
+        ranking_results,
+        ranking_metrics,
+        ranking_protocol,
+    )
+    assert any("same-timestamp or later" in error for error in errors)
 
 
 def _fake_pmf_for_validator() -> PMFModel:

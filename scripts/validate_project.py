@@ -12,12 +12,15 @@ import pandas as pd
 from models.pmf_model import PMFModel
 from utils.data_loader import load_movielens
 from utils.interpretability import (
-    AUDIT_USER_ROLES,
+    EVALUATION_USER_ROLES,
     FACTOR_INTERPRETATION_COLUMNS,
     LOCAL_EXPLANATION_COLUMNS,
+    RANKING_CASE_COLUMNS,
     SIMILARITY_COLUMNS,
 )
 from utils.matrix_creation import load_mappings
+from utils.ranking_evaluation import MODEL_PREFIXES, aggregate_ranking_metrics
+from utils.split import deterministic_user_split
 
 
 REQUIRED_PATHS = [
@@ -27,13 +30,20 @@ REQUIRED_PATHS = [
     "processed/train_ratings.csv",
     "processed/validation_ratings.csv",
     "processed/test_ratings.csv",
+    "processed/ranking_train_ratings.csv",
+    "processed/ranking_targets.csv",
     "processed/user_item_matrix.csv",
     "processed/mappings/user_to_index.json",
     "processed/mappings/movie_to_index.json",
     "processed/mappings/index_to_user.json",
     "processed/mappings/index_to_movie.json",
     "reports/model_metrics.json",
-    "reports/baseline_tuning.json",
+    "reports/bias_baseline_tuning.json",
+    "reports/item_knn_tuning.json",
+    "reports/ranking_protocol.json",
+    "reports/ranking_metrics.json",
+    "reports/ranking_results.csv",
+    "reports/ranking_comparison.png",
     "reports/svd_predictions.npy",
     "reports/svd_metadata.json",
     "reports/pmf_convergence.png",
@@ -55,6 +65,9 @@ REQUIRED_PATHS = [
     "README.md",
     "requirements.txt",
     "app.py",
+    "models/bias_baseline.py",
+    "models/item_knn.py",
+    "scripts/build_analysis_notebook.py",
 ]
 
 RECOMMENDATION_COLUMNS = {
@@ -151,41 +164,87 @@ def _is_finite_number(value: object) -> bool:
 def _validate_benchmark_metrics(metrics: dict[str, object]) -> list[str]:
     errors: list[str] = []
     required = {
-        "Baseline_CF_MSE",
-        "Baseline_CF_RMSE",
-        "SVD_vs_Baseline_improvement_%",
-        "PMF_vs_Baseline_improvement_%",
-        "baseline_best_params",
+        "BiasBaseline_MSE",
+        "BiasBaseline_RMSE",
+        "ItemKNN_MSE",
+        "ItemKNN_RMSE",
+        "SVD_MSE",
+        "SVD_RMSE",
+        "PMF_MSE",
+        "PMF_RMSE",
+        "ItemKNN_vs_BiasBaseline_improvement_%",
+        "SVD_vs_BiasBaseline_improvement_%",
+        "PMF_vs_BiasBaseline_improvement_%",
+        "SVD_vs_ItemKNN_improvement_%",
+        "PMF_vs_ItemKNN_improvement_%",
+        "PMF_vs_SVD_improvement_%",
+        "ItemKNN_beats_BiasBaseline",
+        "SVD_beats_BiasBaseline",
+        "PMF_beats_BiasBaseline",
+        "SVD_beats_ItemKNN",
+        "PMF_beats_ItemKNN",
+        "bias_baseline_best_params",
+        "item_knn_best_params",
     }
     missing = required - set(metrics)
     if missing:
         errors.append(f"model_metrics.json missing benchmark fields: {sorted(missing)}")
         return errors
-    for key in (
-        "Baseline_CF_MSE",
-        "Baseline_CF_RMSE",
-        "SVD_vs_Baseline_improvement_%",
-        "PMF_vs_Baseline_improvement_%",
-    ):
+    numeric_keys = [
+        key
+        for key in required
+        if key.endswith("_MSE")
+        or key.endswith("_RMSE")
+        or key.endswith("improvement_%")
+    ]
+    for key in numeric_keys:
         if not _is_finite_number(metrics.get(key)):
             errors.append(f"{key} must be finite")
-    if _is_finite_number(metrics.get("Baseline_CF_RMSE")) and _is_finite_number(
-        metrics.get("SVD_RMSE")
-    ):
-        if float(metrics["Baseline_CF_RMSE"]) <= float(metrics["SVD_RMSE"]):
-            errors.append("Baseline_CF_RMSE must be greater than SVD_RMSE")
-    if _is_finite_number(metrics.get("Baseline_CF_RMSE")) and _is_finite_number(
-        metrics.get("PMF_RMSE")
-    ):
-        if float(metrics["Baseline_CF_RMSE"]) <= float(metrics["PMF_RMSE"]):
-            errors.append("Baseline_CF_RMSE must be greater than PMF_RMSE")
+    if errors:
+        return errors
+
+    comparisons = {
+        "ItemKNN_beats_BiasBaseline": ("ItemKNN_RMSE", "BiasBaseline_RMSE"),
+        "SVD_beats_BiasBaseline": ("SVD_RMSE", "BiasBaseline_RMSE"),
+        "PMF_beats_BiasBaseline": ("PMF_RMSE", "BiasBaseline_RMSE"),
+        "SVD_beats_ItemKNN": ("SVD_RMSE", "ItemKNN_RMSE"),
+        "PMF_beats_ItemKNN": ("PMF_RMSE", "ItemKNN_RMSE"),
+    }
+    for flag, (model_key, reference_key) in comparisons.items():
+        expected = float(metrics[model_key]) < float(metrics[reference_key])
+        if metrics.get(flag) is not expected:
+            errors.append(f"{flag} does not match the stored RMSE values")
+
+    improvements = {
+        "ItemKNN_vs_BiasBaseline_improvement_%": (
+            "ItemKNN_RMSE",
+            "BiasBaseline_RMSE",
+        ),
+        "SVD_vs_BiasBaseline_improvement_%": (
+            "SVD_RMSE",
+            "BiasBaseline_RMSE",
+        ),
+        "PMF_vs_BiasBaseline_improvement_%": (
+            "PMF_RMSE",
+            "BiasBaseline_RMSE",
+        ),
+        "SVD_vs_ItemKNN_improvement_%": ("SVD_RMSE", "ItemKNN_RMSE"),
+        "PMF_vs_ItemKNN_improvement_%": ("PMF_RMSE", "ItemKNN_RMSE"),
+        "PMF_vs_SVD_improvement_%": ("PMF_RMSE", "SVD_RMSE"),
+    }
+    for field, (model_key, reference_key) in improvements.items():
+        expected = (
+            float(metrics[reference_key]) - float(metrics[model_key])
+        ) / float(metrics[reference_key]) * 100.0
+        if not np.isclose(float(metrics[field]), expected, rtol=0.0, atol=1e-9):
+            errors.append(f"{field} does not match the stored RMSE values")
     return errors
 
 
-def _validate_baseline_tuning_artifact(payload: object) -> list[str]:
+def _validate_bias_baseline_tuning_artifact(payload: object) -> list[str]:
     errors: list[str] = []
     if not isinstance(payload, dict):
-        return ["baseline_tuning.json must contain an object"]
+        return ["bias_baseline_tuning.json must contain an object"]
     required = {
         "model",
         "prediction_formula",
@@ -199,14 +258,18 @@ def _validate_baseline_tuning_artifact(payload: object) -> list[str]:
     }
     missing = required - set(payload)
     if missing:
-        errors.append(f"baseline_tuning.json missing fields: {sorted(missing)}")
+        errors.append(
+            f"bias_baseline_tuning.json missing fields: {sorted(missing)}"
+        )
         return errors
     if payload.get("uses_test_for_tuning") is not False:
-        errors.append("Baseline tuning must declare that test data was not used")
+        errors.append(
+            "Bias baseline tuning must declare that test data was not used"
+        )
     results = payload.get("results")
     selected = payload.get("selected")
     if not isinstance(results, list) or not results:
-        errors.append("Baseline tuning results must be a non-empty list")
+        errors.append("Bias baseline tuning results must be a non-empty list")
     else:
         required_row = {
             "user_regularization",
@@ -217,29 +280,148 @@ def _validate_baseline_tuning_artifact(payload: object) -> list[str]:
         }
         for row in results:
             if not isinstance(row, dict) or required_row - set(row):
-                errors.append("Baseline tuning row has an incomplete schema")
+                errors.append(
+                    "Bias baseline tuning row has an incomplete schema"
+                )
                 break
             if not all(
                 _is_finite_number(row.get(key))
                 for key in required_row
                 if key != "n_iterations"
             ):
-                errors.append("Baseline tuning row contains non-finite values")
+                errors.append(
+                    "Bias baseline tuning row contains non-finite values"
+                )
                 break
     if not isinstance(selected, dict):
-        errors.append("Baseline tuning selected result must be an object")
+        errors.append("Bias baseline selected result must be an object")
     elif results and selected not in results:
-        errors.append("Baseline selected result is not present in tuning results")
+        errors.append(
+            "Bias baseline selected result is not present in tuning results"
+        )
     final_refit = payload.get("final_refit")
     if not isinstance(final_refit, dict) or final_refit.get(
         "uses_train_plus_validation"
     ) is not True:
-        errors.append("Baseline final refit must use train plus validation")
+        errors.append("Bias baseline final refit must use train plus validation")
     test_eval = payload.get("test_evaluation")
     if not isinstance(test_eval, dict) or not all(
         _is_finite_number(test_eval.get(key)) for key in ("mse", "rmse")
     ):
-        errors.append("Baseline test evaluation must contain finite mse/rmse")
+        errors.append(
+            "Bias baseline test evaluation must contain finite mse/rmse"
+        )
+    return errors
+
+
+def _validate_item_knn_tuning_artifact(payload: object) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["item_knn_tuning.json must contain an object"]
+    required = {
+        "model",
+        "prediction_formula",
+        "similarity_definition",
+        "neighborhood_definition",
+        "neighborhood_ordering",
+        "parameter_grid",
+        "selection_metric",
+        "selection_tie_break",
+        "uses_test_for_tuning",
+        "results",
+        "selected",
+        "final_refit",
+        "test_evaluation",
+    }
+    missing = required - set(payload)
+    if missing:
+        return [f"item_knn_tuning.json missing fields: {sorted(missing)}"]
+    if payload.get("model") != "ItemKNN":
+        errors.append("item-kNN tuning model name must be ItemKNN")
+    if payload.get("uses_test_for_tuning") is not False:
+        errors.append("item-kNN tuning must declare that test data was not used")
+    expected_grid = {
+        "k": [20, 40, 80],
+        "shrinkage": [10.0, 50.0, 100.0],
+        "min_common": 3,
+    }
+    if payload.get("parameter_grid") != expected_grid:
+        errors.append("item-kNN tuning grid must be the required 3 x 3 grid")
+    results = payload.get("results")
+    expected_combinations = {
+        (k, shrinkage, 3)
+        for k in (20, 40, 80)
+        for shrinkage in (10.0, 50.0, 100.0)
+    }
+    if not isinstance(results, list) or len(results) != 9:
+        errors.append("item-kNN tuning must contain exactly 9 validation rows")
+    else:
+        combinations = {
+            (row.get("k"), row.get("shrinkage"), row.get("min_common"))
+            for row in results
+            if isinstance(row, dict)
+        }
+        if combinations != expected_combinations:
+            errors.append("item-kNN tuning rows do not match the required grid")
+        for row in results:
+            required_row = {
+                "k",
+                "shrinkage",
+                "min_common",
+                "validation_mse",
+                "validation_rmse",
+            }
+            if not isinstance(row, dict) or required_row - set(row):
+                errors.append("item-kNN tuning row has an incomplete schema")
+                break
+            if not all(_is_finite_number(row.get(key)) for key in required_row):
+                errors.append("item-kNN tuning row contains invalid values")
+                break
+    selected = payload.get("selected")
+    if not isinstance(selected, dict) or not isinstance(results, list):
+        errors.append("item-kNN selected configuration must be an object")
+    elif selected not in results:
+        errors.append("item-kNN selected row is absent from validation results")
+    elif selected != min(
+        results,
+        key=lambda row: (
+            row["validation_rmse"],
+            row["k"],
+            -row["shrinkage"],
+        ),
+    ):
+        errors.append("item-kNN selected row violates the deterministic tie-break")
+    if payload.get("neighborhood_ordering") != [
+        "absolute shrunk similarity descending",
+        "signed shrunk similarity descending",
+        "movie ID ascending",
+    ]:
+        errors.append("item-kNN neighborhood ordering declaration is invalid")
+    final_refit = payload.get("final_refit")
+    diagnostics = (
+        final_refit.get("diagnostics") if isinstance(final_refit, dict) else None
+    )
+    if not isinstance(final_refit, dict) or final_refit.get(
+        "uses_train_plus_validation"
+    ) is not True:
+        errors.append("item-kNN final refit must use train plus validation")
+    if not isinstance(diagnostics, dict):
+        errors.append("item-kNN final refit diagnostics are missing")
+    else:
+        if diagnostics.get("similarities_finite") is not True:
+            errors.append("item-kNN similarities must be finite")
+        if diagnostics.get("self_neighbor_count") != 0:
+            errors.append("item-kNN self-neighbors must be absent")
+        if diagnostics.get("deterministic_ordering_verified") is not True:
+            errors.append("item-kNN stored neighbor ordering is invalid")
+        minimum_common = diagnostics.get("minimum_common_users")
+        if minimum_common is not None and int(minimum_common) < 3:
+            errors.append("item-kNN min_common was not enforced")
+    test_eval = payload.get("test_evaluation")
+    if not isinstance(test_eval, dict) or not all(
+        _is_finite_number(test_eval.get(key)) for key in ("mse", "rmse")
+    ):
+        errors.append("item-kNN test evaluation must contain finite mse/rmse")
     return errors
 
 
@@ -300,21 +482,247 @@ def _validate_similarity_artifact(frame: pd.DataFrame) -> list[str]:
     return errors
 
 
-def _validate_audit_users_payload(
+def _as_bool(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
+def _validate_ranking_artifacts(
+    ranking_train: pd.DataFrame,
+    ranking_targets: pd.DataFrame,
+    ranking_results: pd.DataFrame,
+    ranking_metrics: object,
+    ranking_protocol: object,
+) -> list[str]:
+    errors: list[str] = []
+    target_required = {
+        "user_id",
+        "movie_id",
+        "rating",
+        "timestamp",
+        "prior_history_count",
+        "target_item_support",
+    }
+    if target_required - set(ranking_targets.columns):
+        return ["ranking_targets.csv has an incomplete schema"]
+    if ranking_targets.empty or ranking_targets["user_id"].duplicated().any():
+        errors.append("ranking targets must contain one row per eligible user")
+
+    result_required = {
+        "user_id",
+        "target_movie_id",
+        "target_title",
+        "target_genres",
+        "target_rating",
+        "target_timestamp",
+        "prior_history_count",
+        "candidate_count",
+    }
+    for prefix in MODEL_PREFIXES.values():
+        result_required.update(
+            {
+                f"{prefix}_target_rank",
+                f"{prefix}_raw_target_score",
+                f"{prefix}_hit_at_5",
+                f"{prefix}_hit_at_10",
+                f"{prefix}_ndcg_at_5",
+                f"{prefix}_ndcg_at_10",
+                f"{prefix}_mrr_at_5",
+                f"{prefix}_mrr_at_10",
+            }
+        )
+    missing_results = result_required - set(ranking_results.columns)
+    if missing_results:
+        return [
+            f"ranking_results.csv missing columns: {sorted(missing_results)}"
+        ]
+
+    if not isinstance(ranking_protocol, dict):
+        errors.append("ranking_protocol.json must contain an object")
+    else:
+        if (
+            ranking_protocol.get("protocol")
+            != "next-positive recovery under temporal leave-one-positive-out"
+        ):
+            errors.append("ranking protocol name is invalid")
+        if ranking_protocol.get("full_catalog_candidates") is not True:
+            errors.append("ranking protocol must use full-catalog candidates")
+        if ranking_protocol.get("sampled_negatives") is not False:
+            errors.append("ranking protocol must declare no sampled negatives")
+        if ranking_protocol.get("history_rule") != "timestamp < target_timestamp":
+            errors.append("ranking protocol must use a strict temporal prefix")
+        if int(ranking_protocol.get("min_prior_interactions", 0)) != 20:
+            errors.append("ranking protocol minimum history must be 20")
+        if int(ranking_protocol.get("min_target_item_support", 0)) != 10:
+            errors.append("ranking protocol target support minimum must be 10")
+        frozen = ranking_protocol.get("frozen_model_parameters", {})
+        svd_frozen = frozen.get("SVD", {}) if isinstance(frozen, dict) else {}
+        pmf_frozen = frozen.get("PMF", {}) if isinstance(frozen, dict) else {}
+        if (
+            svd_frozen.get("n_factors") != 20
+            or float(svd_frozen.get("item_bias_regularization", np.nan)) != 5.0
+            or svd_frozen.get("random_state") != 42
+        ):
+            errors.append("ranking SVD parameters are not the frozen selected values")
+        expected_pmf = {
+            "n_factors": 128,
+            "learning_rate": 0.006,
+            "factor_regularization": 0.06,
+            "bias_regularization": 0.02,
+            "epochs": 53,
+            "random_state": 42,
+            "uses_ranking_targets_for_tuning": False,
+        }
+        if any(pmf_frozen.get(key) != value for key, value in expected_pmf.items()):
+            errors.append("ranking PMF parameters are not the frozen selected values")
+
+    supported_movies = set(ranking_train["movie_id"].astype(int))
+    support_counts = ranking_train.groupby("movie_id").size()
+    histories = {
+        int(user_id): group
+        for user_id, group in ranking_train.groupby("user_id", sort=True)
+    }
+    targets_by_user = ranking_targets.set_index("user_id")
+    results_by_user = ranking_results.set_index("user_id")
+    target_users = set(targets_by_user.index.astype(int))
+    result_users = set(results_by_user.index.astype(int))
+    if target_users != result_users:
+        errors.append("ranking result users do not match ranking target users")
+
+    for user_id in sorted(target_users & result_users):
+        target = targets_by_user.loc[user_id]
+        result = results_by_user.loc[user_id]
+        target_movie_id = int(target["movie_id"])
+        target_timestamp = int(target["timestamp"])
+        history = histories.get(user_id)
+        if history is None or history.empty:
+            errors.append(f"ranking user {user_id} has no prefix history")
+            continue
+        if not history["timestamp"].lt(target_timestamp).all():
+            errors.append(
+                f"ranking user {user_id} has same-timestamp or later training rows"
+            )
+        if len(history) != int(target["prior_history_count"]) or len(history) < 20:
+            errors.append(f"ranking user {user_id} has an invalid history count")
+        if ((history["movie_id"].astype(int)) == target_movie_id).any():
+            errors.append(f"ranking target for user {user_id} leaked into history")
+        if float(target["rating"]) < 4.0:
+            errors.append(f"ranking target for user {user_id} is not positive")
+        support = int(support_counts.get(target_movie_id, 0))
+        if support < 10 or support != int(target["target_item_support"]):
+            errors.append(f"ranking target for user {user_id} has invalid support")
+        if target_movie_id not in supported_movies:
+            errors.append(f"ranking target for user {user_id} is unsupported")
+
+        history_movies = set(history["movie_id"].astype(int))
+        expected_candidate_count = len(supported_movies - history_movies)
+        if target_movie_id not in supported_movies - history_movies:
+            errors.append(f"ranking target for user {user_id} left the candidate set")
+        if int(result["candidate_count"]) != expected_candidate_count:
+            errors.append(f"ranking candidate count for user {user_id} is invalid")
+        if expected_candidate_count <= 0:
+            errors.append(f"ranking user {user_id} has no candidates")
+        if (
+            int(result["target_movie_id"]) != target_movie_id
+            or int(result["target_timestamp"]) != target_timestamp
+            or float(result["target_rating"]) != float(target["rating"])
+            or int(result["prior_history_count"]) != len(history)
+        ):
+            errors.append(f"ranking target fields for user {user_id} do not match")
+
+        for prefix in MODEL_PREFIXES.values():
+            rank = int(result[f"{prefix}_target_rank"])
+            if not 1 <= rank <= expected_candidate_count:
+                errors.append(f"{prefix} target rank for user {user_id} is invalid")
+            if not _is_finite_number(result[f"{prefix}_raw_target_score"]):
+                errors.append(
+                    f"{prefix} target score for user {user_id} is non-finite"
+                )
+            for cutoff in (5, 10):
+                expected_hit = rank <= cutoff
+                expected_ndcg = (
+                    float(1.0 / np.log2(rank + 1)) if expected_hit else 0.0
+                )
+                expected_mrr = float(1.0 / rank) if expected_hit else 0.0
+                if _as_bool(result[f"{prefix}_hit_at_{cutoff}"]) != expected_hit:
+                    errors.append(
+                        f"{prefix} Hit@{cutoff} for user {user_id} is invalid"
+                    )
+                if not np.isclose(
+                    float(result[f"{prefix}_ndcg_at_{cutoff}"]),
+                    expected_ndcg,
+                    rtol=0.0,
+                    atol=1e-12,
+                ):
+                    errors.append(
+                        f"{prefix} NDCG@{cutoff} for user {user_id} is invalid"
+                    )
+                if not np.isclose(
+                    float(result[f"{prefix}_mrr_at_{cutoff}"]),
+                    expected_mrr,
+                    rtol=0.0,
+                    atol=1e-12,
+                ):
+                    errors.append(
+                        f"{prefix} MRR@{cutoff} for user {user_id} is invalid"
+                    )
+
+    if not isinstance(ranking_metrics, dict):
+        errors.append("ranking_metrics.json must contain an object")
+    else:
+        if ranking_metrics.get("model_names") != list(MODEL_PREFIXES):
+            errors.append("ranking metric model names are invalid")
+        if ranking_metrics.get("full_catalog_candidates") is not True:
+            errors.append("ranking metrics must declare full-catalog candidates")
+        if ranking_metrics.get("sampled_negatives") is not False:
+            errors.append("ranking metrics must declare no sampled negatives")
+        if any("Recall@" in key for key in ranking_metrics):
+            errors.append("ranking metrics must not duplicate HitRate as Recall")
+        try:
+            recomputed = aggregate_ranking_metrics(ranking_results)
+            for model_name in MODEL_PREFIXES:
+                actual = ranking_metrics["models"][model_name]
+                expected = recomputed["models"][model_name]
+                for key, value in expected.items():
+                    if key == "eligible_user_count":
+                        if int(actual.get(key, -1)) != int(value):
+                            errors.append(
+                                f"{model_name} ranking user count is inconsistent"
+                            )
+                    elif not np.isclose(
+                        float(actual.get(key, np.nan)),
+                        float(value),
+                        rtol=0.0,
+                        atol=1e-12,
+                    ):
+                        errors.append(
+                            f"{model_name} aggregate ranking metric {key} is inconsistent"
+                        )
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"ranking metric reconstruction failed: {exc}")
+    return errors
+
+
+def _validate_evaluation_users_payload(
     evaluated_users: object,
     train: pd.DataFrame,
     validation: pd.DataFrame,
     test: pd.DataFrame,
+    ranking_results: pd.DataFrame,
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(evaluated_users, list) or len(evaluated_users) != 3:
         return ["evaluated_users.json must contain exactly three records"]
     roles = [row.get("role") for row in evaluated_users if isinstance(row, dict)]
     user_ids = [row.get("user_id") for row in evaluated_users if isinstance(row, dict)]
-    if set(roles) != set(AUDIT_USER_ROLES):
-        errors.append(f"Audit user roles must be exactly {list(AUDIT_USER_ROLES)}")
+    if set(roles) != set(EVALUATION_USER_ROLES):
+        errors.append(
+            "Evaluation profile roles must be exactly "
+            f"{list(EVALUATION_USER_ROLES)}"
+        )
     if len(set(user_ids)) != 3:
-        errors.append("Audit user IDs must be unique")
+        errors.append("Evaluation profile user IDs must be unique")
 
     train_counts = train.groupby("user_id").size()
     validation_counts = validation.groupby("user_id").size()
@@ -323,19 +731,35 @@ def _validate_audit_users_payload(
     required = {
         "user_id",
         "role",
+        "ranking_case",
         "selection_reason",
         "train_ratings",
         "validation_ratings",
         "test_ratings",
         "svd_test_rmse",
         "pmf_test_rmse",
+        "ranking_target_movie_id",
+        "ranking_target_title",
+        "ranking_target_rating",
+        "ranking_target_timestamp",
+        "ranking_history_count",
+        "ranking_candidate_count",
+        "bias_target_rank",
+        "item_knn_target_rank",
+        "svd_target_rank",
+        "pmf_target_rank",
+        "bias_hit_at_10",
+        "item_knn_hit_at_10",
+        "svd_hit_at_10",
+        "pmf_hit_at_10",
     }
+    ranking_by_user = ranking_results.set_index("user_id")
     for row in evaluated_users:
         if not isinstance(row, dict):
-            errors.append("Audit user record must be an object")
+            errors.append("Evaluation profile record must be an object")
             continue
         if required - set(row):
-            errors.append("Audit user record has an incomplete schema")
+            errors.append("Evaluation profile record has an incomplete schema")
             continue
         user_id = int(row["user_id"])
         role = str(row["role"])
@@ -348,19 +772,63 @@ def _validate_audit_users_payload(
         for key, expected in expected_counts.items():
             if int(row[key]) != expected or expected <= 0:
                 errors.append(
-                    f"Audit user {user_id} has invalid {key}: "
+                    f"Evaluation profile {user_id} has invalid {key}: "
                     f"{row[key]} != {expected}"
                 )
         if not _is_finite_number(row.get("svd_test_rmse")) or not _is_finite_number(
             row.get("pmf_test_rmse")
         ):
-            errors.append(f"Audit user {user_id} has non-finite per-user RMSE")
+            errors.append(
+                f"Evaluation profile {user_id} has non-finite per-user RMSE"
+            )
+        if user_id not in ranking_by_user.index:
+            errors.append(
+                f"Evaluation profile {user_id} is absent from ranking results"
+            )
+            continue
+        ranking_row = ranking_by_user.loc[user_id]
+        expected_fields = {
+            "ranking_target_movie_id": int(ranking_row["target_movie_id"]),
+            "ranking_target_title": str(ranking_row["target_title"]),
+            "ranking_target_rating": float(ranking_row["target_rating"]),
+            "ranking_target_timestamp": int(ranking_row["target_timestamp"]),
+            "ranking_history_count": int(ranking_row["prior_history_count"]),
+            "ranking_candidate_count": int(ranking_row["candidate_count"]),
+            "bias_target_rank": int(ranking_row["bias_target_rank"]),
+            "item_knn_target_rank": int(ranking_row["item_knn_target_rank"]),
+            "svd_target_rank": int(ranking_row["svd_target_rank"]),
+            "pmf_target_rank": int(ranking_row["pmf_target_rank"]),
+        }
+        for key, expected in expected_fields.items():
+            if row[key] != expected:
+                errors.append(
+                    f"Evaluation profile {user_id} has inconsistent {key}"
+                )
+        for prefix in ("bias", "item_knn", "svd", "pmf"):
+            key = f"{prefix}_hit_at_10"
+            if _as_bool(row[key]) != _as_bool(ranking_row[key]):
+                errors.append(
+                    f"Evaluation profile {user_id} has inconsistent {key}"
+                )
     accurate = by_role.get("train_profile_accurate")
     less = by_role.get("train_profile_less_accurate")
-    if accurate and less and float(accurate["pmf_test_rmse"]) >= float(
-        less["pmf_test_rmse"]
-    ):
-        errors.append("Accurate audit user's PMF RMSE must be lower than less accurate")
+    test_case = by_role.get("test_case")
+    if accurate:
+        if (
+            accurate.get("ranking_case") != "pmf_hit_at_10"
+            or not _as_bool(accurate.get("pmf_hit_at_10"))
+            or int(accurate.get("pmf_target_rank", 0)) > 10
+        ):
+            errors.append("Accurate evaluation profile must be a PMF Hit@10")
+    if less:
+        if (
+            less.get("ranking_case") != "pmf_miss_at_10"
+            or _as_bool(less.get("pmf_hit_at_10"))
+            or int(less.get("pmf_target_rank", 0)) <= 10
+        ):
+            errors.append("Less-accurate evaluation profile must be a PMF miss")
+    if test_case and test_case.get("ranking_case") != "representative_target_rank":
+        errors.append("Test case must use the representative target-rank role")
     return errors
 
 
@@ -467,6 +935,124 @@ def _validate_explanation_artifact(
     return errors
 
 
+def _validate_ranking_case_artifact(
+    ranking_case: pd.DataFrame,
+    ranking_row: pd.Series,
+    user_id: int,
+    role: str,
+) -> list[str]:
+    errors: list[str] = []
+    missing = set(RANKING_CASE_COLUMNS) - set(ranking_case.columns)
+    if missing:
+        return [
+            f"Ranking case CSV for user {user_id} missing columns: {sorted(missing)}"
+        ]
+    if len(ranking_case) != 1:
+        return [f"Ranking case CSV for user {user_id} must contain one row"]
+    row = ranking_case.iloc[0]
+    if int(row["user_id"]) != user_id or str(row["role"]) != role:
+        errors.append(f"Ranking case CSV for user {user_id} has wrong identity")
+    if (
+        int(row["target_movie_id"]) != int(ranking_row["target_movie_id"])
+        or int(row["target_timestamp"]) != int(ranking_row["target_timestamp"])
+        or int(row["candidate_count"]) != int(ranking_row["candidate_count"])
+        or int(row["prior_history_count"])
+        != int(ranking_row["prior_history_count"])
+    ):
+        errors.append(f"Ranking case CSV for user {user_id} has wrong target fields")
+    for prefix in ("bias", "item_knn", "svd", "pmf"):
+        if int(row[f"{prefix}_target_rank"]) != int(
+            ranking_row[f"{prefix}_target_rank"]
+        ):
+            errors.append(
+                f"Ranking case {prefix} rank for user {user_id} is inconsistent"
+            )
+        if not np.isclose(
+            float(row[f"{prefix}_raw_target_score"]),
+            float(ranking_row[f"{prefix}_raw_target_score"]),
+            rtol=0.0,
+            atol=1e-6,
+        ):
+            errors.append(
+                f"Ranking case {prefix} score for user {user_id} is inconsistent"
+            )
+        for cutoff in (5, 10):
+            if _as_bool(row[f"{prefix}_hit_at_{cutoff}"]) != _as_bool(
+                ranking_row[f"{prefix}_hit_at_{cutoff}"]
+            ):
+                errors.append(
+                    f"Ranking case {prefix} Hit@{cutoff} for user {user_id} "
+                    "is inconsistent"
+                )
+    component_sum = (
+        float(row["pmf_global_mean_contribution"])
+        + float(row["pmf_user_bias_contribution"])
+        + float(row["pmf_item_bias_contribution"])
+        + float(row["pmf_total_latent_dot_product"])
+    )
+    if not np.isclose(
+        component_sum,
+        float(row["pmf_raw_target_score"]),
+        rtol=0.0,
+        atol=1e-5,
+    ):
+        errors.append(
+            f"Ranking case PMF decomposition for user {user_id} is broken"
+        )
+    if abs(float(row["pmf_reconstruction_error"])) > 1e-5:
+        errors.append(
+            f"Ranking case PMF reconstruction error for user {user_id} is too high"
+        )
+    nearest_similarity = float(row["nearest_known_similarity"])
+    if not np.isfinite(nearest_similarity) or not -1.000001 <= nearest_similarity <= 1.000001:
+        errors.append(
+            f"Ranking case nearest similarity for user {user_id} is invalid"
+        )
+    return errors
+
+
+def _validate_stale_source_references(root: Path) -> list[str]:
+    errors: list[str] = []
+    stale_paths = [
+        root / "models" / "baseline_cf.py",
+        root / "scripts" / "build_audit_notebook.py",
+    ]
+    for path in stale_paths:
+        if path.exists():
+            errors.append(f"Stale source file remains: {path.relative_to(root)}")
+    stale_tokens = [
+        "models.baseline_cf",
+        "BaselineCFModel",
+        "BaselineCFConfig",
+        "reports/baseline_tuning.json",
+        "scripts/build_audit_notebook.py",
+        "AUDIT_USER_ROLES",
+        "select_audit_users",
+    ]
+    source_paths = [
+        root / "models",
+        root / "utils",
+        root / "app.py",
+        root / "README.md",
+        root / "scripts" / "run_pipeline.py",
+        root / "scripts" / "build_analysis_notebook.py",
+    ]
+    files: list[Path] = []
+    for path in source_paths:
+        if path.is_dir():
+            files.extend(path.glob("*.py"))
+        elif path.exists():
+            files.append(path)
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for token in stale_tokens:
+            if token in text:
+                errors.append(
+                    f"Stale reference {token!r} remains in {path.relative_to(root)}"
+                )
+    return errors
+
+
 def validate() -> list[str]:
     root = Path(__file__).resolve().parents[1]
     errors: list[str] = []
@@ -475,14 +1061,27 @@ def validate() -> list[str]:
             errors.append(f"Missing required file: {relative}")
     if errors:
         return errors
+    errors.extend(_validate_stale_source_references(root))
 
     try:
         with (root / "reports" / "model_metrics.json").open(encoding="utf-8") as handle:
             metrics = json.load(handle)
-        with (root / "reports" / "baseline_tuning.json").open(
+        with (root / "reports" / "bias_baseline_tuning.json").open(
             encoding="utf-8"
         ) as handle:
-            baseline_tuning = json.load(handle)
+            bias_tuning = json.load(handle)
+        with (root / "reports" / "item_knn_tuning.json").open(
+            encoding="utf-8"
+        ) as handle:
+            item_knn_tuning = json.load(handle)
+        with (root / "reports" / "ranking_protocol.json").open(
+            encoding="utf-8"
+        ) as handle:
+            ranking_protocol = json.load(handle)
+        with (root / "reports" / "ranking_metrics.json").open(
+            encoding="utf-8"
+        ) as handle:
+            ranking_metrics = json.load(handle)
         with (root / "reports" / "evaluated_users.json").open(encoding="utf-8") as handle:
             evaluated_users = json.load(handle)
         with (root / "reports" / "svd_metadata.json").open(encoding="utf-8") as handle:
@@ -510,7 +1109,24 @@ def validate() -> list[str]:
     if required_metric_keys - set(metrics):
         errors.append("model_metrics.json has an incomplete schema")
     errors.extend(_validate_benchmark_metrics(metrics))
-    errors.extend(_validate_baseline_tuning_artifact(baseline_tuning))
+    errors.extend(_validate_bias_baseline_tuning_artifact(bias_tuning))
+    errors.extend(_validate_item_knn_tuning_artifact(item_knn_tuning))
+    svd_best = metrics.get("svd_best_params", {})
+    if (
+        svd_best.get("n_factors") != 20
+        or float(svd_best.get("item_bias_regularization", np.nan)) != 5.0
+    ):
+        errors.append("SVD selected parameters changed from rank 20 / bias reg 5.0")
+    pmf_best = metrics.get("pmf_best_params", {})
+    expected_pmf_best = {
+        "n_factors": 128,
+        "learning_rate": 0.006,
+        "factor_regularization": 0.06,
+        "bias_regularization": 0.02,
+        "selected_epoch": 53,
+    }
+    if any(pmf_best.get(key) != value for key, value in expected_pmf_best.items()):
+        errors.append("PMF selected parameters changed from the frozen configuration")
     if metrics.get("SVD_RMSE", np.inf) > 0.90:
         errors.append("SVD RMSE target not met")
     if metrics.get("PMF_RMSE", np.inf) > 0.85:
@@ -600,7 +1216,36 @@ def validate() -> list[str]:
     train = pd.read_csv(root / "processed" / "train_ratings.csv")
     validation = pd.read_csv(root / "processed" / "validation_ratings.csv")
     test = pd.read_csv(root / "processed" / "test_ratings.csv")
-    errors.extend(_validate_audit_users_payload(evaluated_users, train, validation, test))
+    ranking_train = pd.read_csv(
+        root / "processed" / "ranking_train_ratings.csv"
+    )
+    ranking_targets = pd.read_csv(root / "processed" / "ranking_targets.csv")
+    ranking_results = pd.read_csv(root / "reports" / "ranking_results.csv")
+    errors.extend(
+        _validate_ranking_artifacts(
+            ranking_train,
+            ranking_targets,
+            ranking_results,
+            ranking_metrics,
+            ranking_protocol,
+        )
+    )
+    for name, payload in (
+        ("bias baseline", bias_tuning),
+        ("item-kNN", item_knn_tuning),
+    ):
+        test_evaluation = payload.get("test_evaluation", {})
+        if int(test_evaluation.get("test_rows", -1)) != len(test):
+            errors.append(f"{name} test row count does not match the saved split")
+    errors.extend(
+        _validate_evaluation_users_payload(
+            evaluated_users,
+            train,
+            validation,
+            test,
+            ranking_results,
+        )
+    )
 
     try:
         factor_interpretation = pd.read_csv(
@@ -655,12 +1300,43 @@ def validate() -> list[str]:
         errors.append(f"PMF artifact validation failed: {exc}")
 
     data = load_movielens(root / "data")
+    expected_split = deterministic_user_split(data.ratings, random_state=42)
+    for name, actual, expected in (
+        ("train", train, expected_split.train),
+        ("validation", validation, expected_split.validation),
+        ("test", test, expected_split.test),
+    ):
+        actual_sorted = actual.sort_values(
+            ["user_id", "movie_id"], kind="mergesort"
+        ).reset_index(drop=True)
+        expected_sorted = expected.sort_values(
+            ["user_id", "movie_id"], kind="mergesort"
+        ).reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(
+                actual_sorted,
+                expected_sorted,
+                check_dtype=False,
+                check_exact=True,
+            )
+        except AssertionError:
+            errors.append(f"Saved {name} rows do not match the deterministic split")
+
+    ranking_by_user = ranking_results.set_index("user_id")
     for selection in evaluated_users:
         user_id = int(selection["user_id"])
         role = str(selection.get("role"))
         recommendation_path = root / "reports" / f"user_{user_id}_recommendations.csv"
         explanation_path = root / "reports" / f"user_{user_id}_explanations.csv"
         explanation_plot = root / "reports" / f"user_{user_id}_explanation.png"
+        ranking_case_path = root / "reports" / f"user_{user_id}_ranking_case.csv"
+        ranking_case_plot = root / "reports" / f"user_{user_id}_ranking_case.png"
+        if not ranking_case_path.exists():
+            errors.append(f"Missing ranking case CSV for user {user_id}")
+        if not ranking_case_plot.exists():
+            errors.append(f"Missing ranking case PNG for user {user_id}")
+        elif ranking_case_plot.stat().st_size == 0:
+            errors.append(f"Ranking case PNG for user {user_id} is empty")
         if not recommendation_path.exists():
             errors.append(f"Missing recommendation CSV for user {user_id}")
             continue
@@ -718,6 +1394,16 @@ def validate() -> list[str]:
                     expected_count,
                 )
             )
+        if ranking_case_path.exists() and user_id in ranking_by_user.index:
+            ranking_case = pd.read_csv(ranking_case_path)
+            errors.extend(
+                _validate_ranking_case_artifact(
+                    ranking_case,
+                    ranking_by_user.loc[user_id],
+                    user_id,
+                    role,
+                )
+            )
 
     try:
         notebook = nbformat.read(
@@ -732,6 +1418,48 @@ def validate() -> list[str]:
         ]
         if notebook_errors:
             errors.append("Notebook contains error outputs")
+        markdown_text = "\n".join(
+            cell.source
+            for cell in notebook.cells
+            if cell.cell_type == "markdown"
+        )
+        normalized_markdown = " ".join(markdown_text.split())
+        required_sections = [
+            "## 1. Project goal",
+            "## 2. MovieLens EDA and Insights",
+            "## 3. Rating-prediction split",
+            "## 4. Bias baseline",
+            "## 5. Item-kNN neighborhood collaborative filtering",
+            "## 6. SVD methodology and tuning",
+            "## 7. PMF methodology and tuning",
+            "## 8. Convergence, regularization and stopping",
+            "## 9. Rating-prediction results",
+            "## 10. Temporal leave-one-positive-out protocol",
+            "## 11. Top-K ranking results",
+            "## 12. Global latent-factor interpretation",
+            "## 13. Movie similarity analysis",
+            "## 14. User Case Studies",
+            "## 15. Recommendation Hit vs Miss Analysis",
+            "## 16. Local Recommendation Explanations",
+            "## 17. Streamlit and artifact overview",
+            "## 18. Limitations",
+        ]
+        for section in required_sections:
+            if section not in markdown_text:
+                errors.append(f"Notebook is missing required section: {section}")
+        required_statements = [
+            "RMSE is pointwise rating-prediction accuracy",
+            "different tasks",
+            "Unknown catalog items are not observed negatives",
+            "one known future positive",
+            "No sampled negatives are used",
+            "selection now comes from actual temporal ranking outcomes",
+        ]
+        for statement in required_statements:
+            if statement not in normalized_markdown:
+                errors.append(
+                    f"Notebook is missing required methodology statement: {statement}"
+                )
     except Exception as exc:
         errors.append(f"Notebook validation failed: {exc}")
 

@@ -10,25 +10,39 @@
       "test": 147202
     }
   },
-  "Baseline_CF_MSE": 0.8241185717756636,
-  "Baseline_CF_RMSE": 0.9078097662922908,
+  "BiasBaseline_MSE": 0.8241185717756636,
+  "BiasBaseline_RMSE": 0.9078097662922908,
+  "ItemKNN_MSE": 0.737614389002035,
+  "ItemKNN_RMSE": 0.8588447991354637,
   "SVD_MSE": 0.79351785357141,
   "SVD_RMSE": 0.890796190815503,
   "PMF_MSE": 0.7121652343689375,
   "PMF_RMSE": 0.8438988294629503,
-  "SVD_vs_Baseline_improvement_%": 1.8741344396717925,
-  "PMF_vs_Baseline_improvement_%": 7.040124396366422,
+  "ItemKNN_vs_BiasBaseline_improvement_%": 5.393747564185341,
+  "SVD_vs_BiasBaseline_improvement_%": 1.8741344396717925,
+  "PMF_vs_BiasBaseline_improvement_%": 7.040124396366422,
+  "SVD_vs_ItemKNN_improvement_%": -3.720275387613964,
+  "PMF_vs_ItemKNN_improvement_%": 1.7402410409376068,
   "PMF_vs_SVD_improvement_%": 5.264656701059678,
-  "SVD_beats_Baseline_CF": true,
-  "PMF_beats_Baseline_CF": true,
+  "ItemKNN_beats_BiasBaseline": true,
+  "SVD_beats_BiasBaseline": true,
+  "PMF_beats_BiasBaseline": true,
+  "SVD_beats_ItemKNN": false,
+  "PMF_beats_ItemKNN": true,
   "SVD_target_met": true,
   "PMF_target_met": true,
   "improvement_target_met": true,
-  "baseline_best_params": {
+  "bias_baseline_best_params": {
     "user_regularization": 2.0,
     "item_regularization": 2.0,
     "n_iterations": 20,
     "validation_rmse": 0.9054592869944529
+  },
+  "item_knn_best_params": {
+    "k": 80,
+    "shrinkage": 100.0,
+    "min_common": 3,
+    "validation_rmse": 0.8670401426774469
   },
   "svd_best_params": {
     "n_factors": 20,

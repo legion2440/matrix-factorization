@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from models.baseline_cf import BaselineCFModel
+from models.bias_baseline import BiasBaselineModel
+from models.item_knn import ItemKNNModel
 from models.pmf_model import PMFModel
 from models.svd_model import SVDModel
 from scripts.download_data import download_movielens
@@ -33,9 +34,16 @@ from utils.interpretability import (
     build_pmf_factor_genre_profiles,
     build_pmf_factor_interpretation,
     build_pmf_movie_similarities,
+    build_ranking_case_explanation,
     plot_pmf_latent_factor_heatmap,
+    plot_ranking_case,
     plot_user_explanation,
-    select_audit_users,
+    select_evaluation_users,
+)
+from utils.ranking_evaluation import (
+    build_temporal_ranking_protocol,
+    evaluate_ranking_models,
+    plot_ranking_comparison,
 )
 from utils.recommendation import (
     PMFRecommendationModel,
@@ -46,8 +54,11 @@ from utils.split import deterministic_user_split
 
 
 RANDOM_STATE = 42
-BASELINE_BIAS_REGULARIZATION_GRID = [1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
-BASELINE_ITERATIONS = 20
+BIAS_BASELINE_REGULARIZATION_GRID = [1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
+BIAS_BASELINE_ITERATIONS = 20
+ITEM_KNN_K_GRID = [20, 40, 80]
+ITEM_KNN_SHRINKAGE_GRID = [10.0, 50.0, 100.0]
+ITEM_KNN_MIN_COMMON = 3
 SVD_GRID = [5, 10, 20, 40, 60]
 SVD_ITEM_BIAS_REGULARIZATION_GRID = [0.0, 5.0, 10.0, 20.0, 40.0, 80.0]
 PMF_FACTOR_GRID = [96, 112, 128]
@@ -145,7 +156,7 @@ def _tune_svd(
     return best, results
 
 
-def _tune_baseline_cf(
+def _tune_bias_baseline(
     train_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
     validation_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
     n_users: int,
@@ -154,13 +165,13 @@ def _tune_baseline_cf(
     train_users, train_items, train_ratings = train_arrays
     validation_users, validation_items, validation_ratings = validation_arrays
     results: list[dict[str, float | int]] = []
-    for regularization in BASELINE_BIAS_REGULARIZATION_GRID:
-        model = BaselineCFModel(
+    for regularization in BIAS_BASELINE_REGULARIZATION_GRID:
+        model = BiasBaselineModel(
             n_users=n_users,
             n_items=n_items,
             user_regularization=regularization,
             item_regularization=regularization,
-            n_iterations=BASELINE_ITERATIONS,
+            n_iterations=BIAS_BASELINE_ITERATIONS,
             random_state=RANDOM_STATE,
         ).fit(train_users, train_items, train_ratings)
         predictions = model.predict_pairs(validation_users, validation_items, clip=True)
@@ -170,13 +181,13 @@ def _tune_baseline_cf(
             {
                 "user_regularization": float(regularization),
                 "item_regularization": float(regularization),
-                "n_iterations": BASELINE_ITERATIONS,
+                "n_iterations": BIAS_BASELINE_ITERATIONS,
                 "validation_mse": float(validation_mse),
                 "validation_rmse": float(validation_rmse),
             }
         )
         print(
-            "Baseline CF "
+            "Bias baseline "
             f"bias_reg={regularization:g}: validation RMSE={validation_rmse:.6f}"
         )
     best = min(
@@ -190,13 +201,13 @@ def _tune_baseline_cf(
     return best, results
 
 
-def _fit_final_baseline_cf(
+def _fit_final_bias_baseline(
     combined_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
     n_users: int,
     n_items: int,
     best_result: dict[str, float | int],
-) -> BaselineCFModel:
-    model = BaselineCFModel(
+) -> BiasBaselineModel:
+    model = BiasBaselineModel(
         n_users=n_users,
         n_items=n_items,
         user_regularization=float(best_result["user_regularization"]),
@@ -205,6 +216,139 @@ def _fit_final_baseline_cf(
         random_state=RANDOM_STATE,
     )
     return model.fit(*combined_arrays)
+
+
+def _tune_item_knn(
+    train_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    validation_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_users: int,
+    n_items: int,
+    bias_best_result: dict[str, float | int],
+    item_ids: np.ndarray,
+) -> tuple[dict[str, float | int], list[dict[str, float | int]]]:
+    validation_users, validation_items, validation_ratings = validation_arrays
+    results: list[dict[str, float | int]] = []
+    for shrinkage in ITEM_KNN_SHRINKAGE_GRID:
+        model = ItemKNNModel(
+            n_users=n_users,
+            n_items=n_items,
+            n_neighbors=max(ITEM_KNN_K_GRID),
+            shrinkage=shrinkage,
+            min_common=ITEM_KNN_MIN_COMMON,
+            baseline_user_regularization=float(
+                bias_best_result["user_regularization"]
+            ),
+            baseline_item_regularization=float(
+                bias_best_result["item_regularization"]
+            ),
+            baseline_iterations=int(bias_best_result["n_iterations"]),
+            random_state=RANDOM_STATE,
+            item_ids=item_ids,
+        ).fit(*train_arrays)
+        for n_neighbors in ITEM_KNN_K_GRID:
+            predictions = model.predict_pairs(
+                validation_users,
+                validation_items,
+                clip=True,
+                n_neighbors=n_neighbors,
+            )
+            validation_mse = mse(validation_ratings, predictions)
+            validation_rmse = rmse(validation_ratings, predictions)
+            results.append(
+                {
+                    "k": int(n_neighbors),
+                    "shrinkage": float(shrinkage),
+                    "min_common": ITEM_KNN_MIN_COMMON,
+                    "validation_mse": float(validation_mse),
+                    "validation_rmse": float(validation_rmse),
+                }
+            )
+            print(
+                f"Item-kNN k={n_neighbors}, shrinkage={shrinkage:g}: "
+                f"validation RMSE={validation_rmse:.6f}"
+            )
+    best = min(
+        results,
+        key=lambda row: (
+            row["validation_rmse"],
+            row["k"],
+            -row["shrinkage"],
+        ),
+    )
+    return best, results
+
+
+def _fit_final_item_knn(
+    combined_arrays: tuple[np.ndarray, np.ndarray, np.ndarray],
+    n_users: int,
+    n_items: int,
+    bias_best_result: dict[str, float | int],
+    item_knn_best_result: dict[str, float | int],
+    item_ids: np.ndarray,
+) -> ItemKNNModel:
+    model = ItemKNNModel(
+        n_users=n_users,
+        n_items=n_items,
+        n_neighbors=int(item_knn_best_result["k"]),
+        shrinkage=float(item_knn_best_result["shrinkage"]),
+        min_common=int(item_knn_best_result["min_common"]),
+        baseline_user_regularization=float(
+            bias_best_result["user_regularization"]
+        ),
+        baseline_item_regularization=float(
+            bias_best_result["item_regularization"]
+        ),
+        baseline_iterations=int(bias_best_result["n_iterations"]),
+        random_state=RANDOM_STATE,
+        item_ids=item_ids,
+    )
+    return model.fit(*combined_arrays)
+
+
+def _item_knn_diagnostics(model: ItemKNNModel) -> dict[str, object]:
+    model._check_fitted()
+    similarities = (
+        np.concatenate(model.neighbor_similarities)
+        if any(values.size for values in model.neighbor_similarities)
+        else np.empty(0, dtype=np.float64)
+    )
+    common_counts = (
+        np.concatenate(model.neighbor_common_counts)
+        if any(values.size for values in model.neighbor_common_counts)
+        else np.empty(0, dtype=np.int32)
+    )
+    ordering_valid = True
+    self_neighbor_count = 0
+    for item_index, (neighbors, values) in enumerate(
+        zip(
+            model.neighbor_indices,
+            model.neighbor_similarities,
+            strict=True,
+        )
+    ):
+        self_neighbor_count += int(np.sum(neighbors == item_index))
+        keys = [
+            (-abs(float(value)), -float(value), int(model.item_ids[neighbor]))
+            for neighbor, value in zip(neighbors, values, strict=True)
+        ]
+        ordering_valid = ordering_valid and keys == sorted(keys)
+    return {
+        "stored_neighbor_count": int(
+            sum(len(values) for values in model.neighbor_indices)
+        ),
+        "similarities_finite": bool(np.isfinite(similarities).all()),
+        "minimum_similarity": None
+        if similarities.size == 0
+        else float(similarities.min()),
+        "maximum_similarity": None
+        if similarities.size == 0
+        else float(similarities.max()),
+        "minimum_common_users": None
+        if common_counts.size == 0
+        else int(common_counts.min()),
+        "self_neighbor_count": int(self_neighbor_count),
+        "deterministic_ordering_verified": bool(ordering_valid),
+    }
 
 
 def _tune_pmf(
@@ -381,11 +525,19 @@ def main() -> None:
 
     train_arrays = _indexed(split.train, user_to_index, movie_to_index)
     validation_arrays = _indexed(split.validation, user_to_index, movie_to_index)
-    baseline_best, baseline_results = _tune_baseline_cf(
+    bias_best, bias_results = _tune_bias_baseline(
         train_arrays,
         validation_arrays,
         len(user_to_index),
         len(movie_to_index),
+    )
+    item_knn_best, item_knn_results = _tune_item_knn(
+        train_arrays,
+        validation_arrays,
+        len(user_to_index),
+        len(movie_to_index),
+        bias_best,
+        index_to_movie,
     )
 
     svd_best, svd_results = _tune_svd(
@@ -435,11 +587,19 @@ def main() -> None:
     )
 
     combined_arrays = _indexed(train_validation, user_to_index, movie_to_index)
-    final_baseline = _fit_final_baseline_cf(
+    final_bias_baseline = _fit_final_bias_baseline(
         combined_arrays,
         len(user_to_index),
         len(movie_to_index),
-        baseline_best,
+        bias_best,
+    )
+    final_item_knn = _fit_final_item_knn(
+        combined_arrays,
+        len(user_to_index),
+        len(movie_to_index),
+        bias_best,
+        item_knn_best,
+        index_to_movie,
     )
     final_pmf_params = {
         key: pmf_best[key]
@@ -466,30 +626,40 @@ def main() -> None:
     test_users, test_movies, test_actual = _indexed(
         split.test, user_to_index, movie_to_index
     )
-    baseline_test_predictions = final_baseline.predict_pairs(test_users, test_movies)
+    bias_test_predictions = final_bias_baseline.predict_pairs(
+        test_users, test_movies
+    )
+    item_knn_test_predictions = final_item_knn.predict_pairs(
+        test_users, test_movies
+    )
     svd_test_predictions = final_svd.predict_pairs(test_users, test_movies)
     pmf_test_predictions = final_pmf.predict_pairs(test_users, test_movies)
-    baseline_mse = mse(test_actual, baseline_test_predictions)
-    baseline_rmse = rmse(test_actual, baseline_test_predictions)
+    bias_mse = mse(test_actual, bias_test_predictions)
+    bias_rmse = rmse(test_actual, bias_test_predictions)
+    item_knn_mse = mse(test_actual, item_knn_test_predictions)
+    item_knn_rmse = rmse(test_actual, item_knn_test_predictions)
     svd_mse = mse(test_actual, svd_test_predictions)
     pmf_mse = mse(test_actual, pmf_test_predictions)
     svd_rmse = rmse(test_actual, svd_test_predictions)
     pmf_rmse = rmse(test_actual, pmf_test_predictions)
-    improvement = (svd_rmse - pmf_rmse) / svd_rmse * 100.0
-    svd_vs_baseline = (baseline_rmse - svd_rmse) / baseline_rmse * 100.0
-    pmf_vs_baseline = (baseline_rmse - pmf_rmse) / baseline_rmse * 100.0
+    item_knn_vs_bias = (bias_rmse - item_knn_rmse) / bias_rmse * 100.0
+    svd_vs_bias = (bias_rmse - svd_rmse) / bias_rmse * 100.0
+    pmf_vs_bias = (bias_rmse - pmf_rmse) / bias_rmse * 100.0
+    svd_vs_item_knn = (item_knn_rmse - svd_rmse) / item_knn_rmse * 100.0
+    pmf_vs_item_knn = (item_knn_rmse - pmf_rmse) / item_knn_rmse * 100.0
+    pmf_vs_svd = (svd_rmse - pmf_rmse) / svd_rmse * 100.0
 
     save_json(
-        reports_dir / "baseline_tuning.json",
+        reports_dir / "bias_baseline_tuning.json",
         {
-            "model": "regularized_bias_only_collaborative_filtering",
+            "model": "BiasBaseline",
             "prediction_formula": "global_mean + user_bias + item_bias",
             "random_state": RANDOM_STATE,
             "selection_metric": "validation_rmse",
             "uses_test_for_tuning": False,
-            "regularization_grid": BASELINE_BIAS_REGULARIZATION_GRID,
-            "results": baseline_results,
-            "selected": baseline_best,
+            "regularization_grid": BIAS_BASELINE_REGULARIZATION_GRID,
+            "results": bias_results,
+            "selected": bias_best,
             "final_refit": {
                 "training_rows": len(train_validation),
                 "uses_train_plus_validation": True,
@@ -497,8 +667,56 @@ def main() -> None:
             },
             "test_evaluation": {
                 "test_rows": len(split.test),
-                "mse": float(baseline_mse),
-                "rmse": float(baseline_rmse),
+                "mse": float(bias_mse),
+                "rmse": float(bias_rmse),
+            },
+        },
+    )
+    save_json(
+        reports_dir / "item_knn_tuning.json",
+        {
+            "model": "ItemKNN",
+            "prediction_formula": (
+                "bias_baseline + sum(similarity_ij * residual_uj) "
+                "/ sum(abs(similarity_ij))"
+            ),
+            "similarity_definition": (
+                "cosine(item residual vectors) * common_users "
+                "/ (common_users + shrinkage)"
+            ),
+            "neighborhood_definition": (
+                "global top-k eligible item neighbors intersected with the "
+                "target user's fitted rating history"
+            ),
+            "neighborhood_ordering": [
+                "absolute shrunk similarity descending",
+                "signed shrunk similarity descending",
+                "movie ID ascending",
+            ],
+            "parameter_grid": {
+                "k": ITEM_KNN_K_GRID,
+                "shrinkage": ITEM_KNN_SHRINKAGE_GRID,
+                "min_common": ITEM_KNN_MIN_COMMON,
+            },
+            "selection_metric": "validation_rmse",
+            "selection_tie_break": [
+                "lower validation RMSE",
+                "lower k",
+                "higher shrinkage",
+            ],
+            "uses_test_for_tuning": False,
+            "results": item_knn_results,
+            "selected": item_knn_best,
+            "final_refit": {
+                "training_rows": len(train_validation),
+                "uses_train_plus_validation": True,
+                "uses_validation_holdout": False,
+                "diagnostics": _item_knn_diagnostics(final_item_knn),
+            },
+            "test_evaluation": {
+                "test_rows": len(split.test),
+                "mse": float(item_knn_mse),
+                "rmse": float(item_knn_rmse),
             },
         },
     )
@@ -515,25 +733,39 @@ def main() -> None:
                 "test": len(split.test),
             },
         },
-        "Baseline_CF_MSE": baseline_mse,
-        "Baseline_CF_RMSE": baseline_rmse,
+        "BiasBaseline_MSE": bias_mse,
+        "BiasBaseline_RMSE": bias_rmse,
+        "ItemKNN_MSE": item_knn_mse,
+        "ItemKNN_RMSE": item_knn_rmse,
         "SVD_MSE": svd_mse,
         "SVD_RMSE": svd_rmse,
         "PMF_MSE": pmf_mse,
         "PMF_RMSE": pmf_rmse,
-        "SVD_vs_Baseline_improvement_%": svd_vs_baseline,
-        "PMF_vs_Baseline_improvement_%": pmf_vs_baseline,
-        "PMF_vs_SVD_improvement_%": improvement,
-        "SVD_beats_Baseline_CF": svd_rmse < baseline_rmse,
-        "PMF_beats_Baseline_CF": pmf_rmse < baseline_rmse,
+        "ItemKNN_vs_BiasBaseline_improvement_%": item_knn_vs_bias,
+        "SVD_vs_BiasBaseline_improvement_%": svd_vs_bias,
+        "PMF_vs_BiasBaseline_improvement_%": pmf_vs_bias,
+        "SVD_vs_ItemKNN_improvement_%": svd_vs_item_knn,
+        "PMF_vs_ItemKNN_improvement_%": pmf_vs_item_knn,
+        "PMF_vs_SVD_improvement_%": pmf_vs_svd,
+        "ItemKNN_beats_BiasBaseline": item_knn_rmse < bias_rmse,
+        "SVD_beats_BiasBaseline": svd_rmse < bias_rmse,
+        "PMF_beats_BiasBaseline": pmf_rmse < bias_rmse,
+        "SVD_beats_ItemKNN": svd_rmse < item_knn_rmse,
+        "PMF_beats_ItemKNN": pmf_rmse < item_knn_rmse,
         "SVD_target_met": svd_rmse <= 0.90,
         "PMF_target_met": pmf_rmse <= 0.85,
-        "improvement_target_met": improvement >= 5.0,
-        "baseline_best_params": {
-            "user_regularization": float(baseline_best["user_regularization"]),
-            "item_regularization": float(baseline_best["item_regularization"]),
-            "n_iterations": int(baseline_best["n_iterations"]),
-            "validation_rmse": float(baseline_best["validation_rmse"]),
+        "improvement_target_met": pmf_vs_svd >= 5.0,
+        "bias_baseline_best_params": {
+            "user_regularization": float(bias_best["user_regularization"]),
+            "item_regularization": float(bias_best["item_regularization"]),
+            "n_iterations": int(bias_best["n_iterations"]),
+            "validation_rmse": float(bias_best["validation_rmse"]),
+        },
+        "item_knn_best_params": {
+            "k": int(item_knn_best["k"]),
+            "shrinkage": float(item_knn_best["shrinkage"]),
+            "min_common": int(item_knn_best["min_common"]),
+            "validation_rmse": float(item_knn_best["validation_rmse"]),
         },
         "svd_best_params": {
             "n_factors": int(svd_best["n_factors"]),
@@ -557,15 +789,116 @@ def main() -> None:
         reports_dir / "predicted_vs_actual.png",
     )
     plot_rmse_comparison(
+        bias_rmse,
+        item_knn_rmse,
         svd_rmse,
         pmf_rmse,
         reports_dir / "rmse_comparison.png",
-        baseline_rmse=baseline_rmse,
     )
 
     model_movies = data.movies.loc[
         data.movies["movie_id"].isin(index_to_movie)
     ].copy()
+
+    ranking_train, ranking_targets, ranking_protocol = (
+        build_temporal_ranking_protocol(data.ratings)
+    )
+    ranking_train.to_csv(
+        processed_dir / "ranking_train_ratings.csv", index=False
+    )
+    ranking_targets.to_csv(processed_dir / "ranking_targets.csv", index=False)
+    ranking_users = data.users.loc[
+        data.users["user_id"].isin(ranking_train["user_id"])
+    ]
+    ranking_movies = data.movies.loc[
+        data.movies["movie_id"].isin(ranking_train["movie_id"])
+    ]
+    (
+        ranking_user_to_index,
+        ranking_movie_to_index,
+        ranking_index_to_user,
+        ranking_index_to_movie,
+    ) = create_mappings(ranking_users, ranking_movies)
+    ranking_arrays = _indexed(
+        ranking_train,
+        ranking_user_to_index,
+        ranking_movie_to_index,
+    )
+    ranking_bias = _fit_final_bias_baseline(
+        ranking_arrays,
+        len(ranking_user_to_index),
+        len(ranking_movie_to_index),
+        bias_best,
+    )
+    ranking_item_knn = _fit_final_item_knn(
+        ranking_arrays,
+        len(ranking_user_to_index),
+        len(ranking_movie_to_index),
+        bias_best,
+        item_knn_best,
+        ranking_index_to_movie,
+    )
+    ranking_matrix, ranking_user_means = build_normalized_matrix(
+        ranking_train,
+        ranking_user_to_index,
+        ranking_movie_to_index,
+    )
+    ranking_svd = SVDModel(
+        n_factors=int(svd_best["n_factors"]),
+        item_bias_regularization=float(svd_best["item_bias_regularization"]),
+        random_state=RANDOM_STATE,
+    ).fit(ranking_matrix, ranking_user_means)
+    ranking_pmf = _fit_final_pmf(
+        ranking_arrays,
+        len(ranking_user_to_index),
+        len(ranking_movie_to_index),
+        pmf_best,
+    )
+    ranking_results, ranking_metrics = evaluate_ranking_models(
+        ranking_targets,
+        ranking_train,
+        ranking_movies,
+        ranking_user_to_index,
+        ranking_movie_to_index,
+        ranking_index_to_movie,
+        ranking_bias,
+        ranking_item_knn,
+        ranking_svd,
+        ranking_pmf,
+    )
+    ranking_results.to_csv(reports_dir / "ranking_results.csv", index=False)
+    save_json(reports_dir / "ranking_metrics.json", ranking_metrics)
+    plot_ranking_comparison(
+        ranking_metrics,
+        str(reports_dir / "ranking_comparison.png"),
+    )
+    ranking_protocol["frozen_model_parameters"] = {
+        "BiasBaseline": {
+            "user_regularization": float(bias_best["user_regularization"]),
+            "item_regularization": float(bias_best["item_regularization"]),
+            "n_iterations": int(bias_best["n_iterations"]),
+        },
+        "ItemKNN": {
+            "k": int(item_knn_best["k"]),
+            "shrinkage": float(item_knn_best["shrinkage"]),
+            "min_common": int(item_knn_best["min_common"]),
+        },
+        "SVD": {
+            "n_factors": int(svd_best["n_factors"]),
+            "item_bias_regularization": float(
+                svd_best["item_bias_regularization"]
+            ),
+            "random_state": RANDOM_STATE,
+        },
+        "PMF": {
+            **final_pmf_params,
+            "epochs": int(pmf_best["best_epoch"]),
+            "random_state": RANDOM_STATE,
+            "uses_ranking_targets_for_tuning": False,
+        },
+    }
+    save_json(reports_dir / "ranking_protocol.json", ranking_protocol)
+
     factor_interpretation = build_pmf_factor_interpretation(
         final_pmf.item_factors,
         index_to_movie,
@@ -616,14 +949,14 @@ def main() -> None:
     test_with_predictions = split.test.copy()
     test_with_predictions["svd_prediction"] = svd_test_predictions
     test_with_predictions["pmf_prediction"] = pmf_test_predictions
-    evaluated_users = select_audit_users(
+    evaluated_users = select_evaluation_users(
         split.train,
         split.validation,
         test_with_predictions,
-        min_train_ratings=50,
-        min_test_ratings=10,
+        ranking_results,
     )
     save_json(reports_dir / "evaluated_users.json", evaluated_users)
+    ranking_by_user = ranking_results.set_index("user_id")
     first_comparison: pd.DataFrame | None = None
     for selection in evaluated_users:
         user_id = int(selection["user_id"])
@@ -650,6 +983,22 @@ def main() -> None:
             explanations,
             reports_dir / f"user_{user_id}_explanation.png",
         )
+        ranking_case = build_ranking_case_explanation(
+            selection,
+            ranking_by_user.loc[user_id],
+            ranking_train,
+            ranking_pmf,
+            ranking_user_to_index,
+            ranking_movie_to_index,
+            ranking_movies,
+        )
+        ranking_case.to_csv(
+            reports_dir / f"user_{user_id}_ranking_case.csv", index=False
+        )
+        plot_ranking_case(
+            ranking_case,
+            reports_dir / f"user_{user_id}_ranking_case.png",
+        )
         if first_comparison is None:
             first_comparison = comparison
     assert first_comparison is not None
@@ -657,10 +1006,12 @@ def main() -> None:
     plot_top_recommendations(first_comparison, reports_dir / "top_recommendations.png")
 
     print("\nPipeline complete")
-    print(f"Baseline CF test RMSE: {baseline_rmse:.6f}")
+    print(f"Bias baseline test RMSE: {bias_rmse:.6f}")
+    print(f"Item-kNN test RMSE: {item_knn_rmse:.6f}")
     print(f"SVD test RMSE: {svd_rmse:.6f}")
     print(f"PMF test RMSE: {pmf_rmse:.6f}")
-    print(f"PMF improvement: {improvement:.3f}%")
+    print(f"PMF vs SVD improvement: {pmf_vs_svd:.3f}%")
+    print(f"Ranking eligible users: {ranking_metrics['eligible_user_count']}")
     print(f"Metrics: {reports_dir / 'model_metrics.json'}")
 
 

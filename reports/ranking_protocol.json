@@ -1,0 +1,51 @@
+{
+  "protocol": "next-positive recovery under temporal leave-one-positive-out",
+  "positive_threshold": 4.0,
+  "target_selection": "latest rating >= threshold; movie_id ascending tie-break at latest timestamp",
+  "history_rule": "timestamp < target_timestamp",
+  "same_timestamp_and_later_interactions_excluded": true,
+  "min_prior_interactions": 20,
+  "min_target_item_support": 10,
+  "full_catalog_candidates": true,
+  "sampled_negatives": false,
+  "unknown_items_are_observed_negatives": false,
+  "input_user_count": 6040,
+  "history_qualified_user_count": 5787,
+  "eligible_user_count": 5767,
+  "ranking_training_user_count": 5787,
+  "ranking_training_item_count": 3700,
+  "ranking_training_rows": 974610,
+  "same_timestamp_rows_excluded": 12882,
+  "later_rows_excluded": 8263,
+  "exclusion_counts": {
+    "no_positive_target": 2,
+    "insufficient_prior_history": 251,
+    "target_item_below_min_support": 20
+  },
+  "frozen_model_parameters": {
+    "BiasBaseline": {
+      "user_regularization": 2.0,
+      "item_regularization": 2.0,
+      "n_iterations": 20
+    },
+    "ItemKNN": {
+      "k": 80,
+      "shrinkage": 100.0,
+      "min_common": 3
+    },
+    "SVD": {
+      "n_factors": 20,
+      "item_bias_regularization": 5.0,
+      "random_state": 42
+    },
+    "PMF": {
+      "n_factors": 128,
+      "learning_rate": 0.006,
+      "factor_regularization": 0.06,
+      "bias_regularization": 0.02,
+      "epochs": 53,
+      "random_state": 42,
+      "uses_ranking_targets_for_tuning": false
+    }
+  }
+}

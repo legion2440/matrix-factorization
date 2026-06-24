@@ -14,7 +14,7 @@ import pandas as pd
 from models.pmf_model import PMFModel
 
 
-AUDIT_USER_ROLES = (
+EVALUATION_USER_ROLES = (
     "train_profile_accurate",
     "train_profile_less_accurate",
     "test_case",
@@ -73,6 +73,54 @@ LOCAL_EXPLANATION_COLUMNS = [
     "top_factor_contributions",
     "component_sum",
     "reconstruction_error",
+    "nearest_known_movie_id",
+    "nearest_known_title",
+    "nearest_known_genres",
+    "nearest_known_rating",
+    "nearest_known_similarity",
+    "common_genres",
+]
+
+RANKING_CASE_COLUMNS = [
+    "user_id",
+    "role",
+    "ranking_case",
+    "target_movie_id",
+    "target_title",
+    "target_genres",
+    "target_rating",
+    "target_timestamp",
+    "prior_history_count",
+    "candidate_count",
+    "bias_target_rank",
+    "item_knn_target_rank",
+    "svd_target_rank",
+    "pmf_target_rank",
+    "bias_raw_target_score",
+    "item_knn_raw_target_score",
+    "svd_raw_target_score",
+    "pmf_raw_target_score",
+    "bias_hit_at_5",
+    "bias_hit_at_10",
+    "item_knn_hit_at_5",
+    "item_knn_hit_at_10",
+    "svd_hit_at_5",
+    "svd_hit_at_10",
+    "pmf_hit_at_5",
+    "pmf_hit_at_10",
+    "pmf_global_mean_contribution",
+    "pmf_user_bias_contribution",
+    "pmf_item_bias_contribution",
+    "pmf_total_latent_dot_product",
+    "pmf_component_sum",
+    "pmf_reconstruction_error",
+    "top_factor_1_index",
+    "top_factor_1_contribution",
+    "top_factor_2_index",
+    "top_factor_2_contribution",
+    "top_factor_3_index",
+    "top_factor_3_contribution",
+    "top_factor_contributions",
     "nearest_known_movie_id",
     "nearest_known_title",
     "nearest_known_genres",
@@ -356,17 +404,40 @@ def _per_user_rmse(frame: pd.DataFrame, prediction_column: str) -> pd.Series:
     return squared.groupby(frame["user_id"]).mean().pow(0.5)
 
 
-def select_audit_users(
+def select_evaluation_users(
     train: pd.DataFrame,
     validation: pd.DataFrame,
     test_with_predictions: pd.DataFrame,
-    min_train_ratings: int = 50,
-    min_test_ratings: int = 10,
+    ranking_results: pd.DataFrame,
+    min_train_ratings: int = 1,
+    min_test_ratings: int = 1,
 ) -> list[dict[str, Any]]:
     required = {"user_id", "rating", "svd_prediction", "pmf_prediction"}
     missing = required - set(test_with_predictions.columns)
     if missing:
         raise ValueError(f"test predictions missing columns: {sorted(missing)}")
+    ranking_required = {
+        "user_id",
+        "target_movie_id",
+        "target_title",
+        "target_rating",
+        "target_timestamp",
+        "prior_history_count",
+        "candidate_count",
+        "bias_target_rank",
+        "item_knn_target_rank",
+        "svd_target_rank",
+        "pmf_target_rank",
+        "bias_hit_at_10",
+        "item_knn_hit_at_10",
+        "svd_hit_at_10",
+        "pmf_hit_at_10",
+    }
+    ranking_missing = ranking_required - set(ranking_results.columns)
+    if ranking_missing:
+        raise ValueError(
+            f"ranking results missing columns: {sorted(ranking_missing)}"
+        )
 
     train_counts = train.groupby("user_id").size().rename("train_ratings")
     validation_counts = validation.groupby("user_id").size().rename("validation_ratings")
@@ -376,37 +447,59 @@ def select_audit_users(
     profile["svd_test_rmse"] = _per_user_rmse(test_with_predictions, "svd_prediction")
     profile["pmf_test_rmse"] = _per_user_rmse(test_with_predictions, "pmf_prediction")
     profile = profile.dropna(subset=["svd_test_rmse", "pmf_test_rmse"]).reset_index()
-
-    eligible = profile.loc[
-        profile["train_ratings"].ge(min_train_ratings)
-        & profile["test_ratings"].ge(min_test_ratings)
+    eligible = ranking_results.merge(profile, on="user_id", how="inner")
+    eligible = eligible.loc[
+        eligible["train_ratings"].ge(min_train_ratings)
+        & eligible["test_ratings"].ge(min_test_ratings)
     ].copy()
     if len(eligible) < 3:
-        raise ValueError("not enough users satisfy audit support thresholds")
+        raise ValueError("not enough users satisfy minimum profile support thresholds")
 
-    lower_target = float(eligible["pmf_test_rmse"].quantile(0.25))
-    upper_target = float(eligible["pmf_test_rmse"].quantile(0.75))
-    accurate_candidates = eligible.assign(
-        distance=(eligible["pmf_test_rmse"] - lower_target).abs()
-    ).sort_values(["distance", "pmf_test_rmse", "user_id"], kind="mergesort")
-    accurate = accurate_candidates.iloc[0]
-
-    less_candidates = eligible.loc[eligible["user_id"].ne(accurate["user_id"])].assign(
-        distance=(eligible.loc[eligible["user_id"].ne(accurate["user_id"]), "pmf_test_rmse"] - upper_target).abs()
+    accurate_pool = eligible.loc[eligible["pmf_target_rank"].le(10)].copy()
+    if accurate_pool.empty:
+        raise ValueError("ranking results contain no PMF Hit@10 users")
+    non_extreme_hits = accurate_pool.loc[accurate_pool["pmf_target_rank"].gt(1)]
+    if not non_extreme_hits.empty:
+        accurate_pool = non_extreme_hits
+    accurate_target = float(accurate_pool["pmf_target_rank"].median())
+    accurate = (
+        accurate_pool.assign(
+            distance=(accurate_pool["pmf_target_rank"] - accurate_target).abs()
+        )
+        .sort_values(
+            ["distance", "prior_history_count", "user_id"], kind="mergesort"
+        )
+        .iloc[0]
     )
-    less_candidates = less_candidates.loc[
-        less_candidates["pmf_test_rmse"].gt(accurate["pmf_test_rmse"])
-    ].sort_values(["distance", "pmf_test_rmse", "user_id"], kind="mergesort")
-    if less_candidates.empty:
-        raise ValueError("could not select a less accurate user above the accurate RMSE")
-    less_accurate = less_candidates.iloc[0]
 
-    median_test_count = float(eligible["test_ratings"].median())
+    less_pool = eligible.loc[eligible["pmf_target_rank"].gt(10)].copy()
+    if less_pool.empty:
+        raise ValueError("ranking results contain no PMF Miss@10 users")
+    less_target = float(less_pool["pmf_target_rank"].median())
+    less_accurate = (
+        less_pool.assign(
+            distance=(less_pool["pmf_target_rank"] - less_target).abs()
+        )
+        .sort_values(
+            ["distance", "prior_history_count", "user_id"], kind="mergesort"
+        )
+        .iloc[0]
+    )
+
+    overall_target = float(eligible["pmf_target_rank"].median())
     used = {int(accurate["user_id"]), int(less_accurate["user_id"])}
+    representative_pool = eligible.loc[~eligible["user_id"].isin(used)].copy()
+    if representative_pool.empty:
+        raise ValueError("could not select a distinct representative ranking case")
     test_case = (
-        eligible.loc[~eligible["user_id"].isin(used)]
-        .assign(distance=(eligible.loc[~eligible["user_id"].isin(used), "test_ratings"] - median_test_count).abs())
-        .sort_values(["distance", "test_ratings", "user_id"], kind="mergesort")
+        representative_pool.assign(
+            distance=(
+                representative_pool["pmf_target_rank"] - overall_target
+            ).abs()
+        )
+        .sort_values(
+            ["distance", "prior_history_count", "user_id"], kind="mergesort"
+        )
         .iloc[0]
     )
 
@@ -414,31 +507,58 @@ def select_audit_users(
         (
             accurate,
             "train_profile_accurate",
-            f"Eligible user nearest the lower-quartile PMF test RMSE ({lower_target:.4f}) with at least {min_train_ratings} train and {min_test_ratings} test ratings.",
+            "pmf_hit_at_10",
+            (
+                "Supported PMF Hit@10 user nearest the median non-extreme PMF "
+                f"hit rank ({accurate_target:.1f})."
+            ),
         ),
         (
             less_accurate,
             "train_profile_less_accurate",
-            f"Eligible user nearest the upper-quartile PMF test RMSE ({upper_target:.4f}) and worse than the accurate profile.",
+            "pmf_miss_at_10",
+            (
+                "Supported PMF miss user nearest the median PMF miss rank "
+                f"({less_target:.1f})."
+            ),
         ),
         (
             test_case,
             "test_case",
-            f"Separate deterministic test case near the median eligible test support ({median_test_count:.1f}) and distinct from the two training-profile users.",
+            "representative_target_rank",
+            (
+                "Distinct supported user nearest the overall median PMF target "
+                f"rank ({overall_target:.1f})."
+            ),
         ),
     ]
     rows: list[dict[str, Any]] = []
-    for row, role, reason in selections:
+    for row, role, ranking_case, reason in selections:
         rows.append(
             {
                 "user_id": int(row["user_id"]),
                 "role": role,
+                "ranking_case": ranking_case,
                 "selection_reason": reason,
                 "train_ratings": int(row["train_ratings"]),
                 "validation_ratings": int(row["validation_ratings"]),
                 "test_ratings": int(row["test_ratings"]),
                 "svd_test_rmse": float(row["svd_test_rmse"]),
                 "pmf_test_rmse": float(row["pmf_test_rmse"]),
+                "ranking_target_movie_id": int(row["target_movie_id"]),
+                "ranking_target_title": str(row["target_title"]),
+                "ranking_target_rating": float(row["target_rating"]),
+                "ranking_target_timestamp": int(row["target_timestamp"]),
+                "ranking_history_count": int(row["prior_history_count"]),
+                "ranking_candidate_count": int(row["candidate_count"]),
+                "bias_target_rank": int(row["bias_target_rank"]),
+                "item_knn_target_rank": int(row["item_knn_target_rank"]),
+                "svd_target_rank": int(row["svd_target_rank"]),
+                "pmf_target_rank": int(row["pmf_target_rank"]),
+                "bias_hit_at_10": bool(row["bias_hit_at_10"]),
+                "item_knn_hit_at_10": bool(row["item_knn_hit_at_10"]),
+                "svd_hit_at_10": bool(row["svd_hit_at_10"]),
+                "pmf_hit_at_10": bool(row["pmf_hit_at_10"]),
             }
         )
     return rows
@@ -507,8 +627,8 @@ def build_local_pmf_explanations(
     ratings: pd.DataFrame,
     movies: pd.DataFrame,
 ) -> pd.DataFrame:
-    if role not in AUDIT_USER_ROLES:
-        raise ValueError(f"unknown audit role: {role}")
+    if role not in EVALUATION_USER_ROLES:
+        raise ValueError(f"unknown evaluation role: {role}")
     user_index = user_to_index[int(user_id)]
     pmf_rows = recommendations.dropna(subset=["pmf_rank"]).copy()
     pmf_rows = pmf_rows.sort_values(["pmf_rank", "movie_id"], kind="mergesort")
@@ -566,6 +686,138 @@ def build_local_pmf_explanations(
             }
         )
     return pd.DataFrame(rows, columns=LOCAL_EXPLANATION_COLUMNS)
+
+
+def build_ranking_case_explanation(
+    selection: dict[str, Any],
+    ranking_row: pd.Series,
+    ranking_train: pd.DataFrame,
+    ranking_pmf: PMFModel,
+    user_to_index: dict[int, int],
+    movie_to_index: dict[int, int],
+    movies: pd.DataFrame,
+) -> pd.DataFrame:
+    user_id = int(selection["user_id"])
+    role = str(selection["role"])
+    if role not in EVALUATION_USER_ROLES:
+        raise ValueError(f"unknown evaluation role: {role}")
+    ranking_user_id = (
+        int(ranking_row["user_id"])
+        if "user_id" in ranking_row.index
+        else int(ranking_row.name)
+    )
+    if ranking_user_id != user_id:
+        raise ValueError("selection and ranking row refer to different users")
+    target_movie_id = int(ranking_row["target_movie_id"])
+    user_index = user_to_index[user_id]
+    item_index = movie_to_index[target_movie_id]
+    parts = decompose_pmf_score(ranking_pmf, user_index, item_index)
+    top = list(parts["top_factors"])
+    while len(top) < 3:
+        top.append({"factor_index": -1, "contribution": 0.0})
+    nearest = nearest_known_liked_movie(
+        user_id,
+        target_movie_id,
+        ranking_train,
+        movies,
+        movie_to_index,
+        ranking_pmf.item_factors,
+    )
+    component_sum = float(
+        parts["global_mean"]
+        + parts["user_bias"]
+        + parts["item_bias"]
+        + parts["latent_dot"]
+    )
+    row: dict[str, Any] = {
+        "user_id": user_id,
+        "role": role,
+        "ranking_case": str(selection["ranking_case"]),
+        "target_movie_id": target_movie_id,
+        "target_title": str(ranking_row["target_title"]),
+        "target_genres": str(ranking_row["target_genres"]),
+        "target_rating": float(ranking_row["target_rating"]),
+        "target_timestamp": int(ranking_row["target_timestamp"]),
+        "prior_history_count": int(ranking_row["prior_history_count"]),
+        "candidate_count": int(ranking_row["candidate_count"]),
+        "pmf_global_mean_contribution": float(parts["global_mean"]),
+        "pmf_user_bias_contribution": float(parts["user_bias"]),
+        "pmf_item_bias_contribution": float(parts["item_bias"]),
+        "pmf_total_latent_dot_product": float(parts["latent_dot"]),
+        "pmf_component_sum": component_sum,
+        "pmf_reconstruction_error": float(
+            component_sum - float(ranking_row["pmf_raw_target_score"])
+        ),
+        "top_factor_1_index": int(top[0]["factor_index"]),
+        "top_factor_1_contribution": float(top[0]["contribution"]),
+        "top_factor_2_index": int(top[1]["factor_index"]),
+        "top_factor_2_contribution": float(top[1]["contribution"]),
+        "top_factor_3_index": int(top[2]["factor_index"]),
+        "top_factor_3_contribution": float(top[2]["contribution"]),
+        "top_factor_contributions": json.dumps(top, sort_keys=True),
+        "nearest_known_movie_id": nearest["movie_id"],
+        "nearest_known_title": nearest["title"],
+        "nearest_known_genres": nearest["genres"],
+        "nearest_known_rating": nearest["rating"],
+        "nearest_known_similarity": nearest["similarity"],
+        "common_genres": nearest["common_genres"],
+    }
+    for prefix in ("bias", "item_knn", "svd", "pmf"):
+        row[f"{prefix}_target_rank"] = int(ranking_row[f"{prefix}_target_rank"])
+        row[f"{prefix}_raw_target_score"] = float(
+            ranking_row[f"{prefix}_raw_target_score"]
+        )
+        for cutoff in (5, 10):
+            row[f"{prefix}_hit_at_{cutoff}"] = bool(
+                ranking_row[f"{prefix}_hit_at_{cutoff}"]
+            )
+    return pd.DataFrame([row], columns=RANKING_CASE_COLUMNS)
+
+
+def plot_ranking_case(
+    ranking_case: pd.DataFrame,
+    path: str | Path,
+) -> None:
+    if len(ranking_case) != 1:
+        raise ValueError("ranking_case must contain exactly one row")
+    row = ranking_case.iloc[0]
+    labels = ["Bias baseline", "Item-kNN", "SVD", "PMF"]
+    ranks = [
+        int(row["bias_target_rank"]),
+        int(row["item_knn_target_rank"]),
+        int(row["svd_target_rank"]),
+        int(row["pmf_target_rank"]),
+    ]
+    components = [
+        float(row["pmf_global_mean_contribution"]),
+        float(row["pmf_user_bias_contribution"]),
+        float(row["pmf_item_bias_contribution"]),
+        float(row["pmf_total_latent_dot_product"]),
+    ]
+    component_labels = ["Global mean", "User bias", "Item bias", "Latent dot"]
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+    bars = axes[0].bar(labels, ranks, color=["#4c78a8", "#72b7b2", "#f58518", "#54a24b"])
+    axes[0].axhline(10, color="#e45756", linestyle="--", linewidth=1.2)
+    axes[0].set_ylabel("Held-out target rank (lower is better)")
+    axes[0].set_title(
+        f"User {int(row['user_id'])}: {str(row['target_title'])[:42]}"
+    )
+    axes[0].bar_label(bars)
+    axes[0].grid(axis="y", alpha=0.25)
+
+    colors = ["#54a24b" if value >= 0 else "#e45756" for value in components]
+    component_bars = axes[1].barh(component_labels, components, color=colors)
+    axes[1].axvline(0.0, color="black", linewidth=0.8)
+    axes[1].set_xlabel("PMF raw-score contribution")
+    axes[1].set_title(
+        "PMF target decomposition\n"
+        f"Nearest prefix positive: {str(row['nearest_known_title'])[:38]}"
+    )
+    axes[1].bar_label(component_bars, fmt="%.3f")
+    axes[1].grid(axis="x", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_user_explanation(

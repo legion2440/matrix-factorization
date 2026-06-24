@@ -1,0 +1,60 @@
+{
+  "protocol": "next-positive recovery under temporal leave-one-positive-out",
+  "model_names": [
+    "BiasBaseline",
+    "ItemKNN",
+    "SVD",
+    "PMF"
+  ],
+  "eligible_user_count": 5767,
+  "candidate_policy": "all ranking-training-supported items minus the user's strict-prefix history",
+  "full_catalog_candidates": true,
+  "sampled_negatives": false,
+  "unknown_items_are_observed_negatives": false,
+  "models": {
+    "BiasBaseline": {
+      "eligible_user_count": 5767,
+      "mean_target_rank": 1148.594243107335,
+      "median_target_rank": 934.0,
+      "HitRate@5": 0.00468181029998266,
+      "NDCG@5": 0.0020927311587836746,
+      "MRR@5": 0.0012831628229582105,
+      "HitRate@10": 0.013178428992543784,
+      "NDCG@10": 0.00471393654358499,
+      "MRR@10": 0.0022912933741787564
+    },
+    "ItemKNN": {
+      "eligible_user_count": 5767,
+      "mean_target_rank": 1084.283509623721,
+      "median_target_rank": 845.0,
+      "HitRate@5": 0.0026010057222125888,
+      "NDCG@5": 0.00159881811280502,
+      "MRR@5": 0.0012687127911681405,
+      "HitRate@10": 0.005375411825906017,
+      "NDCG@10": 0.002502171800470485,
+      "MRR@10": 0.0016446888564107221
+    },
+    "SVD": {
+      "eligible_user_count": 5767,
+      "mean_target_rank": 1097.4603780128316,
+      "median_target_rank": 796.0,
+      "HitRate@5": 0.019420842725853996,
+      "NDCG@5": 0.011452852098087773,
+      "MRR@5": 0.008840529449164787,
+      "HitRate@10": 0.03069186752210855,
+      "NDCG@10": 0.015064823890874194,
+      "MRR@10": 0.01031346935629925
+    },
+    "PMF": {
+      "eligible_user_count": 5767,
+      "mean_target_rank": 975.6013525229755,
+      "median_target_rank": 696.0,
+      "HitRate@5": 0.014392231662909658,
+      "NDCG@5": 0.009063667250751627,
+      "MRR@5": 0.007337726142997514,
+      "HitRate@10": 0.026703658748049246,
+      "NDCG@10": 0.012976085078615479,
+      "MRR@10": 0.008911816272662467
+    }
+  }
+}

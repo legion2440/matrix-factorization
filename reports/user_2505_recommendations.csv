@@ -1,0 +1,18 @@
+movie_id,title,genres,svd_ranking_score,svd_predicted_rating,svd_rank,pmf_ranking_score,pmf_predicted_rating,pmf_rank
+2905,Sanjuro (1962),Action|Adventure,4.987805,4.987805,1.0,4.7674375,4.7674375,6.0
+1198,Raiders of the Lost Ark (1981),Action|Adventure,4.9631205,4.9631205,2.0,4.907337,4.907337,1.0
+318,"Shawshank Redemption, The (1994)",Drama,4.962291,4.962291,3.0,4.8551116,4.8551116,4.0
+1148,"Wrong Trousers, The (1993)",Animation|Comedy,4.944344,4.944344,4.0,,,
+50,"Usual Suspects, The (1995)",Crime|Thriller,4.9415374,4.9415374,5.0,,,
+745,"Close Shave, A (1995)",Animation|Comedy|Thriller,4.939868,4.939868,6.0,,,
+2019,Seven Samurai (The Magnificent Seven) (Shichinin no samurai) (1954),Action|Drama,4.923581,4.923581,7.0,,,
+1196,Star Wars: Episode V - The Empire Strikes Back (1980),Action|Adventure|Drama|Sci-Fi|War,4.9204564,4.9204564,8.0,,,
+527,Schindler's List (1993),Drama|War,4.889114,4.889114,9.0,,,
+922,Sunset Blvd. (a.k.a. Sunset Boulevard) (1950),Film-Noir,4.887493,4.887493,10.0,,,
+2762,"Sixth Sense, The (1999)",Thriller,,,,4.894681,4.894681,2.0
+1036,Die Hard (1988),Action|Thriller,,,,4.8896685,4.8896685,3.0
+3916,Remember the Titans (2000),Drama,,,,4.7913284,4.7913284,5.0
+2571,"Matrix, The (1999)",Action|Sci-Fi|Thriller,,,,4.7540765,4.7540765,7.0
+2197,Firelight (1997),Drama,,,,4.74498,4.74498,8.0
+3578,Gladiator (2000),Action|Drama,,,,4.7448716,4.7448716,9.0
+3753,"Patriot, The (2000)",Action|Drama|War,,,,4.7444715,4.7444715,10.0

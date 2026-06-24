@@ -1,0 +1,122 @@
+{
+  "model": "ItemKNN",
+  "prediction_formula": "bias_baseline + sum(similarity_ij * residual_uj) / sum(abs(similarity_ij))",
+  "similarity_definition": "cosine(item residual vectors) * common_users / (common_users + shrinkage)",
+  "neighborhood_definition": "global top-k eligible item neighbors intersected with the target user's fitted rating history",
+  "neighborhood_ordering": [
+    "absolute shrunk similarity descending",
+    "signed shrunk similarity descending",
+    "movie ID ascending"
+  ],
+  "parameter_grid": {
+    "k": [
+      20,
+      40,
+      80
+    ],
+    "shrinkage": [
+      10.0,
+      50.0,
+      100.0
+    ],
+    "min_common": 3
+  },
+  "selection_metric": "validation_rmse",
+  "selection_tie_break": [
+    "lower validation RMSE",
+    "lower k",
+    "higher shrinkage"
+  ],
+  "uses_test_for_tuning": false,
+  "results": [
+    {
+      "k": 20,
+      "shrinkage": 10.0,
+      "min_common": 3,
+      "validation_mse": 0.8572779465824847,
+      "validation_rmse": 0.9258930535339839
+    },
+    {
+      "k": 40,
+      "shrinkage": 10.0,
+      "min_common": 3,
+      "validation_mse": 0.8057812040813966,
+      "validation_rmse": 0.8976531646919074
+    },
+    {
+      "k": 80,
+      "shrinkage": 10.0,
+      "min_common": 3,
+      "validation_mse": 0.7713965438675343,
+      "validation_rmse": 0.8782918329732631
+    },
+    {
+      "k": 20,
+      "shrinkage": 50.0,
+      "min_common": 3,
+      "validation_mse": 0.8292157627135901,
+      "validation_rmse": 0.910612850070539
+    },
+    {
+      "k": 40,
+      "shrinkage": 50.0,
+      "min_common": 3,
+      "validation_mse": 0.7821277329653472,
+      "validation_rmse": 0.884379857846925
+    },
+    {
+      "k": 80,
+      "shrinkage": 50.0,
+      "min_common": 3,
+      "validation_mse": 0.7553164348925655,
+      "validation_rmse": 0.8690894285932637
+    },
+    {
+      "k": 20,
+      "shrinkage": 100.0,
+      "min_common": 3,
+      "validation_mse": 0.8216820907798358,
+      "validation_rmse": 0.9064668172524771
+    },
+    {
+      "k": 40,
+      "shrinkage": 100.0,
+      "min_common": 3,
+      "validation_mse": 0.7761732727372896,
+      "validation_rmse": 0.8810069652036184
+    },
+    {
+      "k": 80,
+      "shrinkage": 100.0,
+      "min_common": 3,
+      "validation_mse": 0.7517586090141275,
+      "validation_rmse": 0.8670401426774469
+    }
+  ],
+  "selected": {
+    "k": 80,
+    "shrinkage": 100.0,
+    "min_common": 3,
+    "validation_mse": 0.7517586090141275,
+    "validation_rmse": 0.8670401426774469
+  },
+  "final_refit": {
+    "training_rows": 853007,
+    "uses_train_plus_validation": true,
+    "uses_validation_holdout": false,
+    "diagnostics": {
+      "stored_neighbor_count": 274545,
+      "similarities_finite": true,
+      "minimum_similarity": -0.09016324404620857,
+      "maximum_similarity": 0.377741504898087,
+      "minimum_common_users": 3,
+      "self_neighbor_count": 0,
+      "deterministic_ordering_verified": true
+    }
+  },
+  "test_evaluation": {
+    "test_rows": 147202,
+    "mse": 0.737614389002035,
+    "rmse": 0.8588447991354637
+  }
+}

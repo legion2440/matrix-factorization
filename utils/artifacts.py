@@ -65,19 +65,16 @@ def plot_predicted_vs_actual(
 
 
 def plot_rmse_comparison(
+    bias_baseline_rmse: float,
+    item_knn_rmse: float,
     svd_rmse: float,
     pmf_rmse: float,
     path: str | Path,
-    baseline_rmse: float | None = None,
 ) -> None:
-    labels = ["SVD", "PMF"]
-    values = [svd_rmse, pmf_rmse]
-    colors = ["#4c78a8", "#f58518"]
-    if baseline_rmse is not None:
-        labels = ["Baseline CF", *labels]
-        values = [baseline_rmse, *values]
-        colors = ["#72b7b2", *colors]
-    fig, ax = plt.subplots(figsize=(7, 4))
+    labels = ["Bias baseline", "Item-kNN", "SVD", "PMF"]
+    values = [bias_baseline_rmse, item_knn_rmse, svd_rmse, pmf_rmse]
+    colors = ["#4c78a8", "#72b7b2", "#f58518", "#54a24b"]
+    fig, ax = plt.subplots(figsize=(8, 4.5))
     bars = ax.bar(labels, values, color=colors)
     ax.set(
         ylabel="Test RMSE",
