@@ -43,7 +43,7 @@ def build_notebook(root: Path) -> None:
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd
-        from IPython.display import Image, display
+        from IPython.display import Image, Markdown, display
 
         from utils.data_loader import load_movielens
 
@@ -343,6 +343,188 @@ def build_notebook(root: Path) -> None:
     _md(
         notebook,
         """
+        ### Rating accuracy vs top-K ranking
+
+        The following artifact-derived tables join the pointwise rating results
+        to the temporal ranking results. Target-rank quantiles use pandas
+        `Series.quantile(..., interpolation="linear")`; displayed quantile ranks
+        are rounded half up to the nearest integer.
+        """,
+    )
+    _code(
+        notebook,
+        """
+        model_to_rank_column = {
+            "BiasBaseline": "bias_target_rank",
+            "ItemKNN": "item_knn_target_rank",
+            "SVD": "svd_target_rank",
+            "PMF": "pmf_target_rank",
+        }
+
+        comparison_table = rating_table[["model", "rmse"]].rename(
+            columns={"rmse": "test_rmse"}
+        )
+        comparison_table["HitRate@5"] = comparison_table["model"].map(
+            lambda model: ranking_metrics["models"][model]["HitRate@5"]
+        )
+        comparison_table["HitRate@10"] = comparison_table["model"].map(
+            lambda model: ranking_metrics["models"][model]["HitRate@10"]
+        )
+        comparison_table["median_target_rank"] = comparison_table["model"].map(
+            lambda model: ranking_metrics["models"][model]["median_target_rank"]
+        )
+        comparison_table["share_target_rank_gt_2000"] = comparison_table["model"].map(
+            lambda model: ranking_results[
+                model_to_rank_column[model]
+            ].gt(2000).mean()
+        )
+        comparison_table["rmse_position"] = comparison_table[
+            "test_rmse"
+        ].rank(method="min", ascending=True).astype(int)
+        comparison_table["hit_rate_10_position"] = comparison_table[
+            "HitRate@10"
+        ].rank(method="min", ascending=False).astype(int)
+        comparison_table = comparison_table[[
+            "model",
+            "test_rmse",
+            "rmse_position",
+            "HitRate@5",
+            "HitRate@10",
+            "hit_rate_10_position",
+            "median_target_rank",
+            "share_target_rank_gt_2000",
+        ]].sort_values("rmse_position")
+
+        display(
+            comparison_table.style.hide(axis="index").format({
+                "test_rmse": "{:.3f}",
+                "rmse_position": "{:d}",
+                "HitRate@5": "{:.2%}",
+                "HitRate@10": "{:.2%}",
+                "hit_rate_10_position": "{:d}",
+                "median_target_rank": "{:.0f}",
+                "share_target_rank_gt_2000": "{:.2%}",
+            })
+        )
+
+        quantile_levels = {
+            "p1": 0.01,
+            "p5": 0.05,
+            "p10": 0.10,
+            "p25": 0.25,
+            "p50": 0.50,
+            "p75": 0.75,
+            "p90": 0.90,
+            "p95": 0.95,
+            "p99": 0.99,
+        }
+        pmf_ranks = ranking_results["pmf_target_rank"]
+        svd_ranks = ranking_results["svd_target_rank"]
+        pmf_better_share = pmf_ranks.lt(svd_ranks).mean()
+        svd_better_share = svd_ranks.lt(pmf_ranks).mean()
+        tie_share = pmf_ranks.eq(svd_ranks).mean()
+
+        rank_distribution_rows = []
+        for model, ranks, better_share in [
+            ("SVD", svd_ranks, svd_better_share),
+            ("PMF", pmf_ranks, pmf_better_share),
+        ]:
+            quantiles = ranks.quantile(
+                list(quantile_levels.values()),
+                interpolation="linear",
+            )
+            rank_distribution_rows.append({
+                "model": model,
+                **dict(zip(quantile_levels, quantiles.to_numpy())),
+                "share_rank_gt_2000": ranks.gt(2000).mean(),
+                "per_user_better_share": better_share,
+            })
+
+        rank_distribution_table = pd.DataFrame(rank_distribution_rows)
+        displayed_rank_distribution = rank_distribution_table.copy()
+        percentile_columns = list(quantile_levels)
+        displayed_rank_distribution[percentile_columns] = (
+            np.floor(
+                displayed_rank_distribution[percentile_columns].astype(float)
+                + 0.5
+                + 1e-9
+            ).astype(int)
+        )
+        display(
+            displayed_rank_distribution.style.hide(axis="index").format({
+                **{column: "{:d}" for column in percentile_columns},
+                "share_rank_gt_2000": "{:.2%}",
+                "per_user_better_share": "{:.1%}",
+            })
+        )
+        display(Markdown(f"**SVD/PMF target-rank tie share:** {tie_share:.2%}"))
+
+        item_knn_row = comparison_table.set_index("model").loc["ItemKNN"]
+        svd_row = comparison_table.set_index("model").loc["SVD"]
+        pmf_row = comparison_table.set_index("model").loc["PMF"]
+        rank_by_model = rank_distribution_table.set_index("model")
+
+        assert item_knn_row["rmse_position"] == 2
+        assert item_knn_row["hit_rate_10_position"] == 4
+        assert svd_row["rmse_position"] == 3
+        assert svd_row["hit_rate_10_position"] == 1
+        assert svd_row["HitRate@5"] > pmf_row["HitRate@5"]
+        assert rank_by_model.loc["SVD", "p1"] < rank_by_model.loc["PMF", "p1"]
+        assert rank_by_model.loc["SVD", "p5"] < rank_by_model.loc["PMF", "p5"]
+        assert all(
+            rank_by_model.loc["PMF", column]
+            < rank_by_model.loc["SVD", column]
+            for column in ["p10", "p25", "p50", "p75", "p90", "p95", "p99"]
+        )
+        assert (
+            pmf_row["share_target_rank_gt_2000"]
+            < svd_row["share_target_rank_gt_2000"]
+        )
+
+        rmse_order_text = " < ".join(
+            f"{row.model} ({row.test_rmse:.3f})"
+            for row in comparison_table.sort_values("test_rmse").itertuples()
+        )
+        hit_rate_10_order_text = " > ".join(
+            f"{row['model']} ({row['HitRate@10']:.2%})"
+            for _, row in comparison_table.sort_values(
+                "HitRate@10", ascending=False
+            ).iterrows()
+        )
+        pmf_p10 = int(np.floor(rank_by_model.loc["PMF", "p10"] + 0.5 + 1e-9))
+        svd_p10 = int(np.floor(rank_by_model.loc["SVD", "p10"] + 0.5 + 1e-9))
+
+        bridge_conclusion = f'''
+        The §9 and §11 tables order the four models differently, which makes the
+        §18 caveat concrete. By test RMSE: {rmse_order_text}. By HitRate@10:
+        {hit_rate_10_order_text}.
+
+        Two reversals stand out: ItemKNN is the second-best rating model yet the
+        weakest at top-10 retrieval, and SVD is third on RMSE yet first at top-10.
+
+        Across the full target-rank distribution, PMF has the best median target
+        rank ({pmf_row["median_target_rank"]:.0f}) and a lighter deep tail than
+        SVD ({pmf_row["share_target_rank_gt_2000"]:.2%} vs
+        {svd_row["share_target_rank_gt_2000"]:.2%} above rank 2,000). SVD's
+        advantage is confined to the extreme head: it has the stronger HitRate@5
+        ({svd_row["HitRate@5"]:.2%} vs {pmf_row["HitRate@5"]:.2%}), but the
+        rank-distribution crossover has already occurred by the tenth percentile
+        (PMF {pmf_p10} vs SVD {svd_p10}) and PMF is better through the remaining
+        reported quantiles.
+
+        There is therefore no single best model independent of the objective.
+        PMF is strongest for rating accuracy and typical target rank, while SVD
+        performs best for retrieval in the first few recommendation positions.
+        Why a given model favors the extreme head or the bulk of the rank
+        distribution is not established by these artifacts.
+        '''
+        display(Markdown(bridge_conclusion))
+        """,
+    )
+
+    _md(
+        notebook,
+        """
         ## 12. Global latent-factor interpretation
 
         High-variance PMF factors are described from movies and genres on both
@@ -535,11 +717,12 @@ def build_notebook(root: Path) -> None:
         ## 18. Limitations
 
         The models use collaborative ratings only and do not solve cold start.
-        RMSE and ranking metrics answer different questions. The temporal protocol
-        evaluates one known future positive and has no observed true negatives,
-        so unseen candidates cannot be interpreted as irrelevant. PMF factor
-        interpretations are descriptive, and the selected factor count remains at
-        the searched boundary.
+        As shown in §11, RMSE and top-K ranking produce different model orderings:
+        PMF leads rating accuracy and typical target rank, while SVD leads
+        extreme-head retrieval. The temporal protocol evaluates one known future
+        positive and has no observed true negatives, so unseen candidates cannot
+        be interpreted as irrelevant. PMF factor interpretations are descriptive,
+        and the selected factor count remains at the searched boundary.
         """,
     )
 

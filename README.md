@@ -175,6 +175,12 @@ The current protocol evaluates 5,767 eligible users. Generated ranking results:
 
 SVD has the strongest HitRate@10, NDCG@10, and MRR@10 in this run. PMF has the best mean and median target rank. These outcomes are reported independently from rating RMSE.
 
+### What the metric reversal means
+
+The headline is objective-dependent. PMF is #1 by test RMSE (0.844) and median target rank (696), while SVD is #1 by HitRate@10 (3.07%). ItemKNN reverses from #2 by RMSE (0.859) to #4 by HitRate@10 (0.54%); SVD reverses from #3 by RMSE (0.891) to #1 by HitRate@10 (3.07%).
+
+PMF also has the lighter deep tail: 16.09% of its targets have rank greater than 2,000 versus 21.03% for SVD. SVD's advantage is restricted to the extreme head (HitRate@5 1.94% versus 1.44% for PMF); by p10 PMF has the lower target rank (56 versus 59) and remains better through the reported deep quantiles. The committed artifacts establish this empirical reversal, but they do not establish its causal mechanism.
+
 ## User Case Studies
 
 The persisted roles remain:
