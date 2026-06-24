@@ -360,6 +360,124 @@ def build_notebook(root: Path) -> None:
             "SVD": "svd_target_rank",
             "PMF": "pmf_target_rank",
         }
+        expected_models = list(model_to_rank_column)
+        expected_model_set = set(expected_models)
+        model_sort_order = {
+            model: position
+            for position, model in enumerate(expected_models)
+        }
+
+        def values_tied(left, right):
+            return bool(np.isclose(left, right, rtol=0.0, atol=0.0))
+
+        def metric_value_groups(frame, value_column, ascending):
+            ordered_rows = sorted(
+                (
+                    {
+                        "model": row["model"],
+                        "value": float(row[value_column]),
+                    }
+                    for row in frame[
+                        ["model", value_column]
+                    ].to_dict("records")
+                ),
+                key=lambda row: (
+                    row["value"] if ascending else -row["value"],
+                    model_sort_order[row["model"]],
+                ),
+            )
+            groups = []
+            for row in ordered_rows:
+                if (
+                    not groups
+                    or not values_tied(groups[-1][0]["value"], row["value"])
+                ):
+                    groups.append([row])
+                else:
+                    groups[-1].append(row)
+            return groups
+
+        def competition_positions(frame, value_column, ascending):
+            positions = {}
+            next_position = 1
+            for group in metric_value_groups(
+                frame,
+                value_column,
+                ascending,
+            ):
+                for row in group:
+                    positions[row["model"]] = next_position
+                next_position += len(group)
+            return frame["model"].map(positions).astype(int)
+
+        def grouped_order_text(
+            frame,
+            value_column,
+            ascending,
+            base_decimals,
+            percentage=False,
+        ):
+            groups = metric_value_groups(
+                frame,
+                value_column,
+                ascending,
+            )
+            group_values = [group[0]["value"] for group in groups]
+            decimals = base_decimals
+            while decimals < 17:
+                formatted_values = [
+                    (
+                        f"{value:.{decimals}%}"
+                        if percentage
+                        else f"{value:.{decimals}f}"
+                    )
+                    for value in group_values
+                ]
+                if len(set(formatted_values)) == len(formatted_values):
+                    break
+                decimals += 1
+
+            def format_value(value):
+                if percentage:
+                    return f"{value:.{decimals}%}"
+                return f"{value:.{decimals}f}"
+
+            group_texts = []
+            for group in groups:
+                group_texts.append(
+                    " = ".join(
+                        f"{row['model']} ({format_value(row['value'])})"
+                        for row in group
+                    )
+                )
+            separator = " < " if ascending else " > "
+            return separator.join(group_texts)
+
+        assert (
+            len(rating_table) == len(expected_models)
+            and set(rating_table["model"]) == expected_model_set
+        ), "Rating artifacts must contain exactly the expected four models"
+        assert (
+            set(ranking_metrics["models"]) == expected_model_set
+        ), "Ranking artifacts must contain exactly the expected four models"
+
+        required_rank_columns = list(model_to_rank_column.values())
+        missing_rank_columns = set(required_rank_columns).difference(
+            ranking_results.columns
+        )
+        assert not missing_rank_columns, (
+            "Ranking results are missing target-rank columns: "
+            f"{sorted(missing_rank_columns)}"
+        )
+        target_rank_values = ranking_results[required_rank_columns].to_numpy(
+            dtype=float
+        )
+        assert np.isfinite(target_rank_values).all(), (
+            "Target ranks must be finite"
+        )
+        assert (target_rank_values >= 1).all(), (
+            "Target ranks must be at least 1"
+        )
 
         comparison_table = rating_table[["model", "rmse"]].rename(
             columns={"rmse": "test_rmse"}
@@ -378,12 +496,16 @@ def build_notebook(root: Path) -> None:
                 model_to_rank_column[model]
             ].gt(2000).mean()
         )
-        comparison_table["rmse_position"] = comparison_table[
-            "test_rmse"
-        ].rank(method="min", ascending=True).astype(int)
-        comparison_table["hit_rate_10_position"] = comparison_table[
-            "HitRate@10"
-        ].rank(method="min", ascending=False).astype(int)
+        comparison_table["rmse_position"] = competition_positions(
+            comparison_table,
+            "test_rmse",
+            ascending=True,
+        )
+        comparison_table["hit_rate_10_position"] = competition_positions(
+            comparison_table,
+            "HitRate@10",
+            ascending=False,
+        )
         comparison_table = comparison_table[[
             "model",
             "test_rmse",
@@ -394,6 +516,52 @@ def build_notebook(root: Path) -> None:
             "median_target_rank",
             "share_target_rank_gt_2000",
         ]].sort_values("rmse_position")
+
+        comparison_value_columns = [
+            "test_rmse",
+            "HitRate@5",
+            "HitRate@10",
+            "median_target_rank",
+            "share_target_rank_gt_2000",
+        ]
+        assert np.isfinite(
+            comparison_table[comparison_value_columns].to_numpy(dtype=float)
+        ).all(), "Comparison metrics must be finite"
+        assert comparison_table["median_target_rank"].ge(1).all(), (
+            "Median target ranks must be at least 1"
+        )
+        comparison_share_columns = [
+            "HitRate@5",
+            "HitRate@10",
+            "share_target_rank_gt_2000",
+        ]
+        assert comparison_table[comparison_share_columns].apply(
+            lambda column: column.between(0, 1).all()
+        ).all(), "Hit rates and tail shares must be within [0, 1]"
+
+        expected_rmse_positions = competition_positions(
+            comparison_table,
+            "test_rmse",
+            ascending=True,
+        )
+        expected_hit_rate_positions = competition_positions(
+            comparison_table,
+            "HitRate@10",
+            ascending=False,
+        )
+        assert comparison_table["rmse_position"].equals(
+            expected_rmse_positions
+        ), "RMSE positions must match ascending RMSE rank"
+        assert comparison_table["hit_rate_10_position"].equals(
+            expected_hit_rate_positions
+        ), "HitRate@10 positions must match descending HitRate rank"
+        for position_column in [
+            "rmse_position",
+            "hit_rate_10_position",
+        ]:
+            assert comparison_table[position_column].between(
+                1, len(expected_models)
+            ).all(), f"{position_column} contains an invalid position"
 
         display(
             comparison_table.style.hide(axis="index").format({
@@ -441,8 +609,42 @@ def build_notebook(root: Path) -> None:
             })
 
         rank_distribution_table = pd.DataFrame(rank_distribution_rows)
-        displayed_rank_distribution = rank_distribution_table.copy()
         percentile_columns = list(quantile_levels)
+        rank_distribution_values = rank_distribution_table[
+            percentile_columns
+        ].to_numpy(dtype=float)
+        assert np.isfinite(rank_distribution_values).all(), (
+            "Target-rank quantiles must be finite"
+        )
+        assert all(
+            np.all(np.diff(row) >= -1e-12)
+            for row in rank_distribution_values
+        ), "Target-rank quantiles must be non-decreasing within each model"
+
+        distribution_shares = np.array([
+            *rank_distribution_table["share_rank_gt_2000"].to_numpy(
+                dtype=float
+            ),
+            *rank_distribution_table["per_user_better_share"].to_numpy(
+                dtype=float
+            ),
+            tie_share,
+        ])
+        assert np.isfinite(distribution_shares).all(), (
+            "Distribution shares must be finite"
+        )
+        assert np.logical_and(
+            distribution_shares >= 0,
+            distribution_shares <= 1,
+        ).all(), "Distribution shares must be within [0, 1]"
+        assert np.isclose(
+            pmf_better_share + svd_better_share + tie_share,
+            1.0,
+            rtol=0.0,
+            atol=1e-12,
+        ), "PMF wins, SVD wins, and ties must partition evaluated users"
+
+        displayed_rank_distribution = rank_distribution_table.copy()
         displayed_rank_distribution[percentile_columns] = (
             np.floor(
                 displayed_rank_distribution[percentile_columns].astype(float)
@@ -459,62 +661,344 @@ def build_notebook(root: Path) -> None:
         )
         display(Markdown(f"**SVD/PMF target-rank tie share:** {tie_share:.2%}"))
 
-        item_knn_row = comparison_table.set_index("model").loc["ItemKNN"]
-        svd_row = comparison_table.set_index("model").loc["SVD"]
-        pmf_row = comparison_table.set_index("model").loc["PMF"]
+        comparison_by_model = comparison_table.set_index("model")
+        svd_row = comparison_by_model.loc["SVD"]
+        pmf_row = comparison_by_model.loc["PMF"]
         rank_by_model = rank_distribution_table.set_index("model")
 
-        assert item_knn_row["rmse_position"] == 2
-        assert item_knn_row["hit_rate_10_position"] == 4
-        assert svd_row["rmse_position"] == 3
-        assert svd_row["hit_rate_10_position"] == 1
-        assert svd_row["HitRate@5"] > pmf_row["HitRate@5"]
-        assert rank_by_model.loc["SVD", "p1"] < rank_by_model.loc["PMF", "p1"]
-        assert rank_by_model.loc["SVD", "p5"] < rank_by_model.loc["PMF", "p5"]
-        assert all(
-            rank_by_model.loc["PMF", column]
-            < rank_by_model.loc["SVD", column]
-            for column in ["p10", "p25", "p50", "p75", "p90", "p95", "p99"]
+        rmse_order_text = grouped_order_text(
+            comparison_table,
+            "test_rmse",
+            ascending=True,
+            base_decimals=3,
         )
-        assert (
-            pmf_row["share_target_rank_gt_2000"]
-            < svd_row["share_target_rank_gt_2000"]
+        hit_rate_10_order_text = grouped_order_text(
+            comparison_table,
+            "HitRate@10",
+            ascending=False,
+            base_decimals=2,
+            percentage=True,
         )
 
-        rmse_order_text = " < ".join(
-            f"{row.model} ({row.test_rmse:.3f})"
-            for row in comparison_table.sort_values("test_rmse").itertuples()
+        ordinal_names = {
+            1: "first",
+            2: "second",
+            3: "third",
+            4: "fourth",
+        }
+
+        def position_phrase(position, position_column):
+            tied = comparison_table[position_column].eq(position).sum() > 1
+            ordinal = ordinal_names[int(position)]
+            return f"tied for {ordinal}" if tied else ordinal
+
+        position_change_sentences = []
+        for row in comparison_table.itertuples(index=False):
+            if row.rmse_position == row.hit_rate_10_position:
+                continue
+            position_change_sentences.append(
+                f"{row.model} is "
+                f"{position_phrase(row.rmse_position, 'rmse_position')} "
+                "by RMSE and "
+                f"{position_phrase(
+                    row.hit_rate_10_position,
+                    'hit_rate_10_position',
+                )} by HitRate@10."
+            )
+        if position_change_sentences:
+            position_change_text = " ".join(position_change_sentences)
+        else:
+            position_change_text = (
+                "No model changes position between RMSE and HitRate@10."
+            )
+
+        def format_list(values):
+            values = list(values)
+            if not values:
+                return ""
+            if len(values) == 1:
+                return values[0]
+            if len(values) == 2:
+                return " and ".join(values)
+            return ", ".join(values[:-1]) + f", and {values[-1]}"
+
+        def metric_leaders(column, ascending):
+            best_group = metric_value_groups(
+                comparison_table,
+                column,
+                ascending,
+            )[0]
+            leaders = [row["model"] for row in best_group]
+            best_value = best_group[0]["value"]
+            return leaders, best_value
+
+        rmse_leaders, _ = metric_leaders("test_rmse", ascending=True)
+        median_leaders, best_median = metric_leaders(
+            "median_target_rank", ascending=True
         )
-        hit_rate_10_order_text = " > ".join(
-            f"{row['model']} ({row['HitRate@10']:.2%})"
-            for _, row in comparison_table.sort_values(
-                "HitRate@10", ascending=False
-            ).iterrows()
+        hit_rate_5_leaders, best_hit_rate_5 = metric_leaders(
+            "HitRate@5", ascending=False
         )
-        pmf_p10 = int(np.floor(rank_by_model.loc["PMF", "p10"] + 0.5 + 1e-9))
-        svd_p10 = int(np.floor(rank_by_model.loc["SVD", "p10"] + 0.5 + 1e-9))
+        hit_rate_10_leaders, _ = metric_leaders(
+            "HitRate@10", ascending=False
+        )
+
+        if len(median_leaders) == 1:
+            median_text = (
+                f"{median_leaders[0]} has the best median target rank "
+                f"({best_median:.0f})"
+            )
+        else:
+            median_text = (
+                f"{format_list(median_leaders)} tie for the best median "
+                f"target rank ({best_median:.0f})"
+            )
+
+        if values_tied(
+            pmf_row["share_target_rank_gt_2000"],
+            svd_row["share_target_rank_gt_2000"],
+        ):
+            tail_text = (
+                "SVD and PMF have the same deep-tail share "
+                f"({pmf_row['share_target_rank_gt_2000']:.2%} above "
+                "rank 2,000)"
+            )
+        else:
+            tail_leader = min(
+                ["SVD", "PMF"],
+                key=lambda model: comparison_by_model.loc[
+                    model, "share_target_rank_gt_2000"
+                ],
+            )
+            tail_other = "PMF" if tail_leader == "SVD" else "SVD"
+            tail_text = (
+                f"{tail_leader} has a lighter deep tail than {tail_other} "
+                f"({comparison_by_model.loc[
+                    tail_leader, 'share_target_rank_gt_2000'
+                ]:.2%} vs {comparison_by_model.loc[
+                    tail_other, 'share_target_rank_gt_2000'
+                ]:.2%} above rank 2,000)"
+            )
+
+        svd_pmf_hit_rate_5 = {
+            "SVD": float(svd_row["HitRate@5"]),
+            "PMF": float(pmf_row["HitRate@5"]),
+        }
+        if values_tied(
+            svd_pmf_hit_rate_5["SVD"],
+            svd_pmf_hit_rate_5["PMF"],
+        ):
+            extreme_head_text = (
+                "SVD and PMF tie on HitRate@5 "
+                f"({svd_pmf_hit_rate_5['SVD']:.2%})"
+            )
+        else:
+            extreme_head_leader = max(
+                svd_pmf_hit_rate_5,
+                key=svd_pmf_hit_rate_5.get,
+            )
+            extreme_head_other = (
+                "PMF" if extreme_head_leader == "SVD" else "SVD"
+            )
+            extreme_head_text = (
+                f"{extreme_head_leader} leads extreme-head retrieval by "
+                "HitRate@5 "
+                f"({svd_pmf_hit_rate_5[extreme_head_leader]:.2%} vs "
+                f"{svd_pmf_hit_rate_5[extreme_head_other]:.2%})"
+            )
+
+        percentile_leaders = []
+        for column in percentile_columns:
+            svd_value = rank_by_model.loc["SVD", column]
+            pmf_value = rank_by_model.loc["PMF", column]
+            if values_tied(svd_value, pmf_value):
+                leader = "tie"
+            elif svd_value < pmf_value:
+                leader = "SVD"
+            else:
+                leader = "PMF"
+            percentile_leaders.append(leader)
+
+        non_tied_percentiles = [
+            (index, leader)
+            for index, leader in enumerate(percentile_leaders)
+            if leader != "tie"
+        ]
+        first_change = None
+        if non_tied_percentiles:
+            initial_leader = non_tied_percentiles[0][1]
+            first_change = next(
+                (
+                    (index, leader)
+                    for index, leader in non_tied_percentiles[1:]
+                    if leader != initial_leader
+                ),
+                None,
+            )
+
+        if first_change is None:
+            if not non_tied_percentiles:
+                percentile_pattern_text = (
+                    "SVD and PMF tie at every reported target-rank "
+                    "percentile, so there is no crossover."
+                )
+            else:
+                sole_leader = non_tied_percentiles[0][1]
+                leader_columns = [
+                    percentile_columns[index]
+                    for index, leader in non_tied_percentiles
+                    if leader == sole_leader
+                ]
+                tied_columns = [
+                    percentile_columns[index]
+                    for index, leader in enumerate(percentile_leaders)
+                    if leader == "tie"
+                ]
+                tie_suffix = (
+                    f" and ties {format_list(tied_columns)}"
+                    if tied_columns
+                    else ""
+                )
+                percentile_pattern_text = (
+                    f"{sole_leader} leads {format_list(leader_columns)}"
+                    f"{tie_suffix}; there is no reported percentile "
+                    "crossover."
+                )
+        else:
+            change_index, changed_leader = first_change
+            earlier_leader = next(
+                leader for _, leader in non_tied_percentiles
+            )
+            earlier_columns = [
+                percentile_columns[index]
+                for index, leader in non_tied_percentiles
+                if index < change_index and leader == earlier_leader
+            ]
+            later_leaders = percentile_leaders[change_index:]
+            clean_crossover = bool(later_leaders) and all(
+                leader in {changed_leader, "tie"}
+                for leader in later_leaders
+            )
+            if clean_crossover:
+                later_tied_columns = [
+                    percentile_columns[index]
+                    for index in range(change_index, len(percentile_columns))
+                    if percentile_leaders[index] == "tie"
+                ]
+                if later_tied_columns:
+                    later_leader_columns = [
+                        percentile_columns[index]
+                        for index in range(
+                            change_index,
+                            len(percentile_columns),
+                        )
+                        if percentile_leaders[index] == changed_leader
+                    ]
+                    later_summary = (
+                        f"{changed_leader} leads "
+                        f"{format_list(later_leader_columns)} and ties "
+                        f"{format_list(later_tied_columns)}, with no later "
+                        f"reversal through {percentile_columns[-1]}."
+                    )
+                else:
+                    later_summary = (
+                        f"{changed_leader} leads every remaining reported "
+                        f"percentile through {percentile_columns[-1]}."
+                    )
+                percentile_pattern_text = (
+                    f"{earlier_leader} leads "
+                    f"{format_list(earlier_columns)}. The lower-rank leader "
+                    f"changes at {percentile_columns[change_index]}, and "
+                    f"{later_summary}"
+                )
+            else:
+                later_counts = {
+                    model: later_leaders.count(model)
+                    for model in ["SVD", "PMF"]
+                }
+                decisive_later_count = sum(later_counts.values())
+                if later_counts["SVD"] == later_counts["PMF"]:
+                    majority_text = (
+                        "neither model leads a majority of the non-tied "
+                        "later percentiles"
+                    )
+                else:
+                    majority_leader = max(later_counts, key=later_counts.get)
+                    majority_text = (
+                        f"{majority_leader} leads "
+                        f"{later_counts[majority_leader]} of "
+                        f"{decisive_later_count} non-tied later percentiles"
+                    )
+                percentile_pattern_text = (
+                    "The percentile pattern is mixed rather than a clean "
+                    f"crossover. The first lower-rank leader change occurs "
+                    f"at {percentile_columns[change_index]}; {majority_text}."
+                )
+
+        per_user_text = (
+            "Per user, PMF has the lower target rank in "
+            f"{pmf_better_share:.1%} of cases, SVD in "
+            f"{svd_better_share:.1%}, with {tie_share:.1%} ties."
+        )
+
+        objective_leader_sets = [
+            rmse_leaders,
+            median_leaders,
+            hit_rate_5_leaders,
+            hit_rate_10_leaders,
+        ]
+        same_leaders_all_objectives = all(
+            leaders == objective_leader_sets[0]
+            for leaders in objective_leader_sets[1:]
+        )
+
+        if same_leaders_all_objectives and len(rmse_leaders) == 1:
+            objective_text = (
+                f"{rmse_leaders[0]} leads all four reported objectives: "
+                "rating RMSE, median target rank, HitRate@5, and HitRate@10."
+            )
+        elif same_leaders_all_objectives:
+            objective_text = (
+                f"{format_list(rmse_leaders)} tie across all four reported "
+                "objectives."
+            )
+        elif (
+            len(rmse_leaders) == 1
+            and len(median_leaders) == 1
+            and len(hit_rate_5_leaders) == 1
+            and len(hit_rate_10_leaders) == 1
+            and rmse_leaders == median_leaders
+            and hit_rate_5_leaders == hit_rate_10_leaders
+            and rmse_leaders != hit_rate_5_leaders
+        ):
+            objective_text = (
+                "There is therefore no single best model independent of "
+                f"the objective. {rmse_leaders[0]} is strongest for rating "
+                "accuracy and typical target rank, while "
+                f"{hit_rate_5_leaders[0]} performs best for retrieval in "
+                "the first few recommendation positions."
+            )
+        else:
+            objective_text = (
+                "The preferred model depends on the objective. Current "
+                f"leaders are {format_list(rmse_leaders)} by RMSE, "
+                f"{format_list(median_leaders)} by median target rank, "
+                f"{format_list(hit_rate_5_leaders)} by HitRate@5, and "
+                f"{format_list(hit_rate_10_leaders)} by HitRate@10."
+            )
 
         bridge_conclusion = f'''
-        The §9 and §11 tables order the four models differently, which makes the
-        §18 caveat concrete. By test RMSE: {rmse_order_text}. By HitRate@10:
+        The §9 and §11 tables make the objective-dependent comparison concrete.
+        By test RMSE: {rmse_order_text}. By HitRate@10:
         {hit_rate_10_order_text}.
 
-        Two reversals stand out: ItemKNN is the second-best rating model yet the
-        weakest at top-10 retrieval, and SVD is third on RMSE yet first at top-10.
+        {position_change_text}
 
-        Across the full target-rank distribution, PMF has the best median target
-        rank ({pmf_row["median_target_rank"]:.0f}) and a lighter deep tail than
-        SVD ({pmf_row["share_target_rank_gt_2000"]:.2%} vs
-        {svd_row["share_target_rank_gt_2000"]:.2%} above rank 2,000). SVD's
-        advantage is confined to the extreme head: it has the stronger HitRate@5
-        ({svd_row["HitRate@5"]:.2%} vs {pmf_row["HitRate@5"]:.2%}), but the
-        rank-distribution crossover has already occurred by the tenth percentile
-        (PMF {pmf_p10} vs SVD {svd_p10}) and PMF is better through the remaining
-        reported quantiles.
+        Across the full target-rank distribution, {median_text}.
+        {tail_text}. {extreme_head_text}. {percentile_pattern_text}
+        {per_user_text}
 
-        There is therefore no single best model independent of the objective.
-        PMF is strongest for rating accuracy and typical target rank, while SVD
-        performs best for retrieval in the first few recommendation positions.
+        {objective_text}
         Why a given model favors the extreme head or the bulk of the rank
         distribution is not established by these artifacts.
         '''
@@ -717,12 +1201,13 @@ def build_notebook(root: Path) -> None:
         ## 18. Limitations
 
         The models use collaborative ratings only and do not solve cold start.
-        As shown in §11, RMSE and top-K ranking produce different model orderings:
-        PMF leads rating accuracy and typical target rank, while SVD leads
-        extreme-head retrieval. The temporal protocol evaluates one known future
-        positive and has no observed true negatives, so unseen candidates cannot
-        be interpreted as irrelevant. PMF factor interpretations are descriptive,
-        and the selected factor count remains at the searched boundary.
+        As shown in §11, RMSE, typical target rank, and extreme-head retrieval
+        can produce different model orderings; the preferred model therefore
+        depends on the evaluation objective. The temporal protocol evaluates one
+        known future positive and has no observed true negatives, so unseen
+        candidates cannot be interpreted as irrelevant. PMF factor
+        interpretations are descriptive, and the selected factor count remains
+        at the searched boundary.
         """,
     )
 
