@@ -394,7 +394,7 @@ def plot_ranking_comparison(
             color=colors[model_index],
         )
     ax.set_xticks(positions, metric_names)
-    ax.set_ylim(0.0, max(0.05, float(values.max()) * 1.2))
+    ax.set_ylim(0.0, 0.04)
     ax.set_ylabel("Metric value")
     ax.set_title("Full-catalog next-positive recovery")
     ax.grid(axis="y", alpha=0.25)

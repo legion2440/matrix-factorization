@@ -774,10 +774,7 @@ def build_ranking_case_explanation(
     return pd.DataFrame([row], columns=RANKING_CASE_COLUMNS)
 
 
-def plot_ranking_case(
-    ranking_case: pd.DataFrame,
-    path: str | Path,
-) -> None:
+def _build_ranking_case_figure(ranking_case: pd.DataFrame) -> plt.Figure:
     if len(ranking_case) != 1:
         raise ValueError("ranking_case must contain exactly one row")
     row = ranking_case.iloc[0]
@@ -788,34 +785,140 @@ def plot_ranking_case(
         int(row["svd_target_rank"]),
         int(row["pmf_target_rank"]),
     ]
-    components = [
-        float(row["pmf_global_mean_contribution"]),
+    adjustments = [
         float(row["pmf_user_bias_contribution"]),
         float(row["pmf_item_bias_contribution"]),
         float(row["pmf_total_latent_dot_product"]),
     ]
-    component_labels = ["Global mean", "User bias", "Item bias", "Latent dot"]
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
-    bars = axes[0].bar(labels, ranks, color=["#4c78a8", "#72b7b2", "#f58518", "#54a24b"])
-    axes[0].axhline(10, color="#e45756", linestyle="--", linewidth=1.2)
-    axes[0].set_ylabel("Held-out target rank (lower is better)")
-    axes[0].set_title(
+    adjustment_labels = ["User bias", "Item bias", "Latent dot product"]
+    colors = ["#4c78a8", "#72b7b2", "#f58518", "#54a24b"]
+    positions = np.arange(len(labels))
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.8))
+    rank_axis = axes[0]
+    rank_axis.axvspan(1, 10, color="#54a24b", alpha=0.14, label="Top-10")
+    rank_axis.hlines(
+        positions,
+        1,
+        ranks,
+        color=colors,
+        linewidth=2.5,
+        alpha=0.8,
+    )
+    rank_axis.scatter(ranks, positions, color=colors, s=85, zorder=3)
+    rank_axis.set_xscale("log")
+    rank_axis.set_xlim(left=1, right=max(ranks) * 1.55)
+    rank_axis.set_yticks(positions, labels)
+    rank_axis.invert_yaxis()
+    rank_axis.set_xlabel("Held-out target rank (log scale; lower is better)")
+    rank_axis.set_title(
         f"User {int(row['user_id'])}: {str(row['target_title'])[:42]}"
     )
-    axes[0].bar_label(bars)
-    axes[0].grid(axis="y", alpha=0.25)
-
-    colors = ["#54a24b" if value >= 0 else "#e45756" for value in components]
-    component_bars = axes[1].barh(component_labels, components, color=colors)
-    axes[1].axvline(0.0, color="black", linewidth=0.8)
-    axes[1].set_xlabel("PMF raw-score contribution")
-    axes[1].set_title(
-        "PMF target decomposition\n"
-        f"Nearest prefix positive: {str(row['nearest_known_title'])[:38]}"
+    rank_axis.grid(axis="x", which="both", alpha=0.28)
+    for position, rank in zip(positions, ranks, strict=True):
+        rank_axis.annotate(
+            f"{rank:,}",
+            (rank, position),
+            xytext=(7, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+        )
+    rank_axis.text(
+        np.sqrt(10),
+        -0.48,
+        "Top-10",
+        ha="center",
+        va="center",
+        color="#2f6b3c",
+        fontsize=9,
     )
-    axes[1].bar_label(component_bars, fmt="%.3f")
-    axes[1].grid(axis="x", alpha=0.25)
+
+    decomposition_axis = axes[1]
+    adjustment_colors = [
+        "#54a24b" if value >= 0 else "#e45756" for value in adjustments
+    ]
+    adjustment_positions = np.arange(len(adjustment_labels))
+    bars = decomposition_axis.barh(
+        adjustment_positions,
+        adjustments,
+        color=adjustment_colors,
+        alpha=0.9,
+    )
+    decomposition_axis.set_yticks(adjustment_positions, adjustment_labels)
+    decomposition_axis.invert_yaxis()
+    decomposition_axis.axvline(0.0, color="black", linewidth=1.0)
+    decomposition_axis.set_xlabel("Adjustment to the global-mean baseline")
+    decomposition_axis.set_title(
+        "PMF target decomposition\n"
+        "raw PMF score = global mean + adjustments"
+    )
+    decomposition_axis.grid(axis="x", alpha=0.25)
+
+    max_adjustment = max(abs(value) for value in adjustments)
+    limit = max(max_adjustment * 1.55, 0.1)
+    decomposition_axis.set_xlim(-limit, limit)
+    for bar, value in zip(bars, adjustments, strict=True):
+        offset = 5 if value >= 0 else -5
+        decomposition_axis.annotate(
+            f"{value:+.4f}",
+            (value, bar.get_y() + bar.get_height() / 2),
+            xytext=(offset, 0),
+            textcoords="offset points",
+            ha="left" if value >= 0 else "right",
+            va="center",
+            fontsize=9,
+        )
+
+    global_mean = float(row["pmf_global_mean_contribution"])
+    raw_score = float(row["pmf_raw_target_score"])
+    component_sum = float(row["pmf_component_sum"])
+    decomposition_axis.text(
+        0.98,
+        0.97,
+        f"Global mean baseline: {global_mean:.4f}",
+        transform=decomposition_axis.transAxes,
+        ha="right",
+        va="top",
+        fontsize=10,
+        fontweight="bold",
+        bbox={
+            "boxstyle": "round,pad=0.3",
+            "facecolor": "white",
+            "edgecolor": "#777777",
+            "alpha": 0.9,
+        },
+    )
+    decomposition_axis.text(
+        0.02,
+        -0.12,
+        f"Final raw PMF score: {raw_score:.4f}",
+        transform=decomposition_axis.transAxes,
+        ha="left",
+        va="top",
+        fontsize=10,
+        fontweight="bold",
+    )
+    decomposition_axis.text(
+        0.98,
+        -0.12,
+        f"Reconstructed component sum: {component_sum:.4f}",
+        transform=decomposition_axis.transAxes,
+        ha="right",
+        va="top",
+        fontsize=10,
+    )
+
     fig.tight_layout()
+    return fig
+
+
+def plot_ranking_case(
+    ranking_case: pd.DataFrame,
+    path: str | Path,
+) -> None:
+    fig = _build_ranking_case_figure(ranking_case)
     fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
 

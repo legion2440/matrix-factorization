@@ -584,7 +584,7 @@ def main() -> None:
     save_json(reports_dir / "pmf_convergence.json", pmf_convergence)
     plot_pmf_convergence(
         pmf_convergence,
-        reports_dir / "pmf_convergence_rmse.png",
+        reports_dir / "pmf_convergence.png",
         metric="rmse",
     )
     plot_pmf_convergence(
@@ -842,7 +842,7 @@ def main() -> None:
     )
     plot_model_metric_comparison(
         model_rmse,
-        reports_dir / "model_rmse_comparison.png",
+        reports_dir / "rmse_comparison.png",
         metric="RMSE",
     )
     model_movies = data.movies.loc[

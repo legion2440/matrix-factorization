@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+import matplotlib.pyplot as plt
 
 from models.pmf_model import PMFModel
 from utils.interpretability import (
@@ -13,6 +14,7 @@ from utils.interpretability import (
     decompose_pmf_score,
     nearest_known_liked_movie,
     select_evaluation_users,
+    _build_ranking_case_figure,
 )
 
 
@@ -224,6 +226,50 @@ def test_ranking_case_reconstructs_ranking_pmf_target_score():
     assert abs(float(case.loc[0, "pmf_reconstruction_error"])) <= 1e-6
     assert int(case.loc[0, "pmf_target_rank"]) == 1
     assert int(case.loc[0, "nearest_known_movie_id"]) in {20, 40}
+
+
+def test_ranking_case_plot_uses_log_ranks_and_separate_global_mean():
+    ranking_case = pd.DataFrame(
+        [
+            {
+                "user_id": 1,
+                "target_title": "Target",
+                "bias_target_rank": 817,
+                "item_knn_target_rank": 2106,
+                "svd_target_rank": 729,
+                "pmf_target_rank": 696,
+                "pmf_global_mean_contribution": 3.6,
+                "pmf_user_bias_contribution": 0.04,
+                "pmf_item_bias_contribution": -0.22,
+                "pmf_total_latent_dot_product": 0.44,
+                "pmf_raw_target_score": 3.86,
+                "pmf_component_sum": 3.86,
+            }
+        ]
+    )
+
+    figure = _build_ranking_case_figure(ranking_case)
+    rank_axis, decomposition_axis = figure.axes
+
+    assert rank_axis.get_xscale() == "log"
+    assert rank_axis.get_xlim()[0] == pytest.approx(1.0)
+    assert [tick.get_text() for tick in rank_axis.get_yticklabels()] == [
+        "Bias baseline",
+        "Item-kNN",
+        "SVD",
+        "PMF",
+    ]
+    assert len(rank_axis.patches) == 1
+    assert len(decomposition_axis.patches) == 3
+    assert [
+        tick.get_text() for tick in decomposition_axis.get_yticklabels()
+    ] == ["User bias", "Item bias", "Latent dot product"]
+    text = " ".join(item.get_text() for item in decomposition_axis.texts)
+    assert "Global mean baseline: 3.6000" in text
+    assert "Final raw PMF score: 3.8600" in text
+    assert "Reconstructed component sum: 3.8600" in text
+    assert "global mean + adjustments" in decomposition_axis.get_title()
+    plt.close(figure)
 
 
 def test_evaluation_user_selection_roles_support_and_determinism():

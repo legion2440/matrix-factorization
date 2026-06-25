@@ -374,7 +374,7 @@ def build_notebook(root: Path) -> None:
     _code(
         notebook,
         """
-        display(Image(filename=str(REPORTS / "pmf_convergence_rmse.png")))
+        display(Image(filename=str(REPORTS / "pmf_convergence.png")))
         display(Image(filename=str(REPORTS / "pmf_convergence_mse.png")))
         display(pd.DataFrame(pmf_convergence["history"]).tail())
         pmf_metadata = load_json(REPORTS / "pmf_factors" / "metadata.json")
@@ -399,7 +399,7 @@ def build_notebook(root: Path) -> None:
         rating_table = build_rating_table(metrics)
         display(rating_table)
         display(Image(filename=str(REPORTS / "model_mse_comparison.png")))
-        display(Image(filename=str(REPORTS / "model_rmse_comparison.png")))
+        display(Image(filename=str(REPORTS / "rmse_comparison.png")))
         display(Image(filename=str(REPORTS / "predicted_vs_actual.png")))
         """,
     )
@@ -632,8 +632,8 @@ def build_notebook(root: Path) -> None:
         """
         artifacts = [
             "model_metrics.json", "model_mse_comparison.png",
-            "model_rmse_comparison.png", "pmf_convergence_mse.png",
-            "pmf_convergence_rmse.png", "svd_rank_tuning_mse.png",
+            "rmse_comparison.png", "pmf_convergence_mse.png",
+            "pmf_convergence.png", "svd_rank_tuning_mse.png",
             "svd_rank_tuning_rmse.png", "ranking_protocol.json",
             "ranking_metrics.json", "ranking_results.csv",
             "ranking_comparison.png", "evaluated_users.json",
