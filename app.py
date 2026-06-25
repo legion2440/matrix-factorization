@@ -136,9 +136,10 @@ def _apply_layout_css() -> None:
             margin-right: auto;
             overflow-x: visible;
             overflow-y: visible;
-            border: 1px solid rgba(49, 51, 63, 0.18);
+            border: 1px solid rgba(128, 128, 128, 0.35);
             border-radius: 8px;
-            background: white;
+            background: var(--background-color, transparent);
+            color: var(--text-color, inherit);
         }
         .mf-table-wrap--scroll {
             width: 100%;
@@ -153,7 +154,7 @@ def _apply_layout_css() -> None:
         .mf-table th,
         .mf-table td {
             padding: 0.5rem 0.75rem;
-            border-bottom: 1px solid rgba(49, 51, 63, 0.12);
+            border-bottom: 1px solid rgba(128, 128, 128, 0.28);
             text-align: left;
             vertical-align: top;
             white-space: normal;
@@ -166,15 +167,22 @@ def _apply_layout_css() -> None:
             z-index: 1;
         }
         .mf-table th {
-            background: rgb(248, 249, 251);
-            color: rgb(49, 51, 63);
+            background: var(
+                --secondary-background-color,
+                rgba(128, 128, 128, 0.12)
+            );
+            color: var(--text-color, inherit);
             font-weight: 600;
         }
         .mf-table tr:last-child td {
             border-bottom: 0;
         }
         .mf-table tbody tr:nth-child(even) {
-            background: rgba(49, 51, 63, 0.035);
+            background: color-mix(
+                in srgb,
+                var(--secondary-background-color, rgba(128, 128, 128, 0.12)) 45%,
+                transparent
+            );
         }
         </style>
         """,
