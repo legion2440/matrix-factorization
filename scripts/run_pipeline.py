@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -369,7 +368,6 @@ def _tune_pmf(
     best_result: dict[str, object] | None = None
     for number, params in enumerate(PMF_GRID, start=1):
         print(f"PMF tuning {number}/{len(PMF_GRID)}: {params}")
-        started = time.perf_counter()
         model = PMFModel(
             n_users=n_users,
             n_items=n_items,
@@ -391,7 +389,6 @@ def _tune_pmf(
             "best_epoch": int(model.best_epoch or len(model.history)),
             "validation_rmse": float(model.best_validation_rmse or np.inf),
             "epochs_run": len(model.history),
-            "seconds": round(time.perf_counter() - started, 3),
             "hit_epoch_cap": int(model.best_epoch or len(model.history))
             == PMF_TUNING_EPOCHS,
             "hit_factor_boundary": int(params["n_factors"])
@@ -594,11 +591,6 @@ def main() -> None:
         pmf_convergence,
         reports_dir / "pmf_convergence_mse.png",
         metric="mse",
-    )
-    plot_pmf_convergence(
-        pmf_convergence,
-        reports_dir / "pmf_convergence.png",
-        metric="rmse",
     )
     pmf_search_diagnostics = _pmf_search_diagnostics(pmf_best)
 
@@ -853,12 +845,6 @@ def main() -> None:
         reports_dir / "model_rmse_comparison.png",
         metric="RMSE",
     )
-    plot_model_metric_comparison(
-        model_rmse,
-        reports_dir / "rmse_comparison.png",
-        metric="RMSE",
-    )
-
     model_movies = data.movies.loc[
         data.movies["movie_id"].isin(index_to_movie)
     ].copy()

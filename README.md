@@ -1,246 +1,503 @@
-# MovieLens 1M Matrix Factorization
+# Matrix Factorization для MovieLens 1M
 
-This project builds a reproducible MovieLens 1M recommender with four local models:
+Рекомендательная система на MovieLens 1M с двумя отдельными задачами оценки:
 
-- Bias baseline: `global_mean + user_bias + item_bias`.
-- Item-kNN: residualized neighborhood collaborative filtering with shrunk cosine similarity.
-- SVD: truncated sparse residual factorization with a regularized item residual bias.
-- PMF: biased matrix factorization trained by locally implemented seeded SGD.
+- **rating prediction** - точность предсказания числовой оценки;
+- **Top-K ranking** - положение будущего положительного объекта среди непросмотренных кандидатов.
 
-Generated artifacts power the notebook and Streamlit dashboard without retraining at display time.
+В проекте реализованы четыре локальные модели:
 
-## Clean-Clone Order
+- `BiasBaseline` - регуляризованный baseline из глобального среднего, user bias и item bias;
+- `SVD` - усечённая факторизация разреженной residual-матрицы;
+- `PMF` - вероятностная матричная факторизация с локально реализованным SGD;
+- `ItemKNN` - neighborhood collaborative filtering по residual ratings.
 
-Use Windows Git Bash from the project root:
+Notebook и Streamlit используют сохранённые артефакты и не переобучают модели при отображении.
+
+## 📋 Содержание
+
+- [Запуск](#-запуск)
+- [Данные и лицензия](#-данные-и-лицензия)
+- [Структура проекта](#-структура-проекта)
+- [EDA](#-eda)
+- [Rating prediction](#-rating-prediction)
+- [Модели](#-модели)
+- [MSE и RMSE](#-mse-и-rmse)
+- [Benchmark для RMSE](#-benchmark-для-rmse)
+- [Top-K ranking](#-top-k-ranking)
+- [Rating accuracy и ranking quality](#-rating-accuracy-и-ranking-quality)
+- [Showcase-пользователи](#-showcase-пользователи)
+- [Интерпретация](#-интерпретация)
+- [Streamlit](#-streamlit)
+- [Проверка проекта](#-проверка-проекта)
+- [Ограничения](#-ограничения)
+- [🧑‍💻 Автор](#-автор)
+
+## 🚀 Запуск
+
+Среда разработки - Windows и Git Bash. Путь `/d/...` соответствует `D:\...`.
 
 ```bash
-cd /d/TSchool/matrix-factorization
+git clone https://01.tomorrow-school.ai/git/nyestaye/matrix-factorization
+cd matrix-factorization
+
 python -m venv .venv
 source .venv/Scripts/activate
+
 python -m pip install -r requirements.txt
 python -m scripts.run_pipeline
 python -m scripts.build_analysis_notebook
-python -m jupyter nbconvert --to notebook --execute Movie_Recommender_System.ipynb --output Movie_Recommender_System.ipynb
+python -m jupyter nbconvert \
+  --to notebook \
+  --execute Movie_Recommender_System.ipynb \
+  --output Movie_Recommender_System.ipynb
+```
+
+Проверка:
+
+```bash
 python -m pytest -q
 python -m compileall models utils scripts app.py
 python -m scripts.validate_project
 bash scripts/smoke_streamlit.sh
 ```
 
-The pipeline downloads MovieLens 1M only when the raw files are missing.
+Запуск интерфейса:
 
-## Project Structure
+```bash
+python -m streamlit run app.py
+```
 
-- `data/`: raw MovieLens files.
-- `processed/`: rating-prediction splits, temporal ranking data, mappings, and normalized matrix data.
-- `models/`: local BiasBaseline, ItemKNN, SVD, and PMF implementations.
-- `utils/`: data, evaluation, recommendation, artifact, and interpretation helpers.
-- `reports/`: generated metrics, plots, recommendations, and explanations.
-- `scripts/`: pipeline, validation, notebook builder, and bounded Streamlit smoke test.
-- `tests/`: synthetic model, protocol, validator, and Streamlit behavior tests.
-- `Movie_Recommender_System.ipynb`: executed artifact-backed analysis.
-- `app.py`: artifact-backed Streamlit dashboard.
+## 📦 Данные и лицензия
 
-## Rating Prediction Evaluation
+Проект использует стабильный набор [MovieLens 1M](https://grouplens.org/datasets/movielens/1m/).
 
-The authoritative pointwise rating protocol uses the unchanged deterministic 70/15/15 interaction split with `random_state=42`.
+Исходные файлы не хранятся в репозитории:
 
-- Hyperparameters and stopping decisions use validation rows only.
-- BiasBaseline, ItemKNN, SVD, and PMF are refit on train plus validation.
-- MSE and RMSE are computed once on the same untouched test rows.
-- Predictions are clipped to `[1, 5]` only for rating evaluation and display.
-- Raw scores remain available for recommendation ordering.
+```text
+data/ratings.dat
+data/users.dat
+data/movies.dat
+```
 
-RMSE measures pointwise rating-prediction error. It does not measure Top-K recommendation accuracy.
+Условия MovieLens не разрешают публичное перераспространение набора без отдельного разрешения. При отсутствии файлов pipeline загружает официальный архив GroupLens и распаковывает его локально.
 
-### Bias Baseline
+```bash
+python -m scripts.run_pipeline
+```
 
-`models/bias_baseline.py` implements the regularized ablation:
+Крупные воспроизводимые артефакты также не хранятся в Git:
+
+```text
+processed/user_item_matrix.csv
+reports/svd_predictions.npy
+```
+
+Они создаются pipeline и проверяются validator после выполнения полного процесса.
+
+Цитирование набора:
+
+> F. Maxwell Harper and Joseph A. Konstan. 2015. The MovieLens Datasets: History and Context. ACM Transactions on Interactive Intelligent Systems, 5(4), Article 19. https://doi.org/10.1145/2827872
+
+## 📁 Структура проекта
+
+```text
+matrix-factorization/
+├── audit/                             # официальный аудит-лист 01-edu
+│   └── README.md   
+├── data/                              # Локальные raw-файлы MovieLens
+├── processed/                         # Splits, mappings и ranking data
+├── models/                            # BiasBaseline, ItemKNN, SVD, PMF
+├── utils/                             # Метрики, ranking, explanations, plots
+├── reports/                           # Сгенерированные отчёты и графики
+├── scripts/                           # Pipeline, notebook builder, validator
+├── tests/                             # Unit и protocol tests
+├── Movie_Recommender_System.ipynb     # Выполненный аналитический notebook
+├── app.py                             # Streamlit dashboard
+├── README.md
+└── requirements.txt
+```
+
+## 🔎 EDA
+
+EDA считается непосредственно из локальных raw-файлов MovieLens и используется только для описания данных.
+
+Основные свойства:
+
+- `1,000,209` оценок;
+- `6,040` пользователей;
+- `3,706` фильмов;
+- разреженность user-item матрицы около `0.957`;
+- медианная активность пользователя - `96` оценок;
+- медианная популярность фильма - `123` оценки;
+- распределение оценок смещено к высоким значениям;
+- активность пользователей неоднородна;
+- популярность фильмов имеет длинный хвост.
+
+Дополнительные срезы:
+
+- распределение оценок во времени;
+- покрытие фильмов и оценок по жанрам;
+- пол, возрастные группы и профессии пользователей.
+
+Фильмы могут относиться к нескольким жанрам, поэтому после `explode` жанровые количества не являются взаимоисключающими долями.
+
+Жанры и демография не используются как признаки моделей:
+
+- жанры применяются только для post-hoc интерпретации, genre entropy и latent factor profiles;
+- возраст, пол и профессия показываются только как контекст набора;
+- модели остаются collaborative-only.
+
+Полный raw dataset используется только для descriptive EDA. Выбор гиперпараметров, stopping decisions и сравнение моделей выполняются по заранее заданным train и validation splits. Test split не используется до финальной оценки.
+
+## 🎯 Rating prediction
+
+Основной протокол использует детерминированный interaction split:
+
+```text
+70% train
+15% validation
+15% test
+random_state = 42
+```
+
+Правила:
+
+- split выполняется внутри истории каждого пользователя;
+- validation используется для выбора гиперпараметров и early stopping;
+- финальные модели переобучаются на `train + validation`;
+- все модели оцениваются на одинаковых test rows;
+- test не используется для выбора модели;
+- predictions ограничиваются диапазоном `[1, 5]` только для rating metrics и отображения;
+- raw scores сохраняются для recommendation ordering.
+
+## 🧠 Модели
+
+### BiasBaseline
 
 ```text
 prediction = global_mean + user_bias + item_bias
 ```
 
-User and item regularization are selected from `[1, 2, 5, 10, 20, 40, 80]` using validation RMSE. The selected value is data-driven and stored in `reports/bias_baseline_tuning.json`.
+Регуляризованный baseline учитывает:
+- общий уровень оценок;
+- склонность пользователя ставить выше или ниже среднего;
+- систематическое смещение конкретного фильма.
 
-### Item-kNN
+Такая постановка соответствует стандартным baseline estimates в collaborative filtering, включая формулировки Yehuda Koren и алгоритм [`BaselineOnly`](https://surprise.readthedocs.io/en/stable/basic_algorithms.html) в Surprise.
 
-`models/item_knn.py` is the classical neighborhood collaborative-filtering reference. It first fits the selected bias baseline and computes observed residuals:
-
-```text
-residual_ui = rating_ui - bias_baseline_ui
-```
-
-Item similarity is shrunk cosine:
-
-```text
-similarity_ij =
-    cosine(residual_vector_i, residual_vector_j)
-    * common_users_ij / (common_users_ij + shrinkage)
-```
-
-Pairs require at least three common users. A prediction adds a signed residual correction over the globally selected top-k item neighbors that the user rated:
-
-```text
-bias_baseline_ui
-+ sum(similarity_ij * residual_uj) / sum(abs(similarity_ij))
-```
-
-The grid is `k in [20, 40, 80]` and `shrinkage in [10, 50, 100]`. Neighbor ordering is deterministic: absolute similarity descending, signed similarity descending, then movie ID ascending. Missing usable neighbors fall back exactly to the bias prediction.
+Регуляризация user и item biases выбирается по validation RMSE.
 
 ### SVD
 
-SVD user-centers observed ratings, estimates a regularized item residual bias, and factorizes the sparse residual matrix with `scipy.sparse.linalg.svds`.
+SVD:
+- центрирует наблюдаемые оценки по пользователям;
+- оценивает регуляризованный item residual bias;
+- факторизует sparse residual matrix через `scipy.sparse.linalg.svds`;
+- сохраняет raw predictions для ranking.
 
-The preserved selected parameters are:
+Выбранная конфигурация:
 
-- factors: 20
-- item-bias regularization: 5.0
-- random state: 42
+```text
+n_factors = 20
+item_bias_regularization = 5.0
+random_state = 42
+```
+
+SVD выполняется прямым truncated decomposition и не имеет epoch-based learning curve. Графики `SVD rank tuning` показывают validation MSE и RMSE для проверенных значений rank и фиксируют выбор `rank = 20`.
 
 ### PMF
 
-PMF predicts:
+PMF предсказывает:
 
 ```text
-global_mean + user_bias + item_bias + dot(user_factors, item_factors)
+global_mean
++ user_bias
++ item_bias
++ dot(user_factors, item_factors)
 ```
 
-The preserved selected configuration is:
+Реализация включает:
+- локальный seeded SGD;
+- детерминированное перемешивание;
+- отдельную регуляризацию biases и factors;
+- validation-only early stopping;
+- восстановление лучшего checkpoint;
+- финальный refit на `train + validation`.
 
-- factors: 128
-- learning rate: 0.006
-- factor regularization: 0.06
-- bias regularization: 0.02
-- selected epoch: 53
-- random state: 42
+Выбранная конфигурация:
 
-Tuning uses validation-only early stopping. The final refit uses exactly the selected epoch count on train plus validation.
+```text
+n_factors = 128
+learning_rate = 0.006
+factor_regularization = 0.06
+bias_regularization = 0.02
+selected_epoch = 53
+random_state = 42
+```
 
-Actual test metrics and pairwise booleans are stored in `reports/model_metrics.json`. No model is declared better than ItemKNN unless the generated RMSE values prove it.
+PMF convergence показывается отдельно в MSE и RMSE с train и validation curves.
 
-Current generated rating results:
+### ItemKNN
 
-| Model | Test MSE | Test RMSE |
-|---|---:|---:|
-| BiasBaseline | 0.824119 | 0.907810 |
-| ItemKNN | 0.737614 | 0.858845 |
-| SVD | 0.793518 | 0.890796 |
-| PMF | 0.712165 | 0.843899 |
+`ItemKNN` служит дополнительным сильным neighborhood-CF reference.
 
-ItemKNN improves on BiasBaseline by 5.394% RMSE. SVD does not beat ItemKNN in this run; its RMSE is 3.720% worse. PMF improves on ItemKNN by 1.740% and on SVD by 5.265%.
+Алгоритм:
+1. Обучает выбранный `BiasBaseline`.
+2. Вычитает baseline predictions из наблюдаемых ratings.
+3. Считает item-item cosine similarity по residual-векторам.
+4. Применяет significance shrinkage.
+5. Требует минимум три общих пользователя.
+6. Использует signed similarity в numerator и absolute similarity в denominator.
+7. При отсутствии подходящих соседей возвращается к bias prediction.
 
-## Top-K Recommendation Evaluation
+Параметры выбираются по validation RMSE:
 
-Top-K quality uses a separate temporal leave-one-positive-out protocol. It does not reuse the 70/15/15 test rows as ranking positives.
+```text
+k ∈ {20, 40, 80}
+shrinkage ∈ {10, 50, 100}
+```
 
-For each eligible user:
+ItemKNN не является порогом задания. Его задачи:
+- проверить, превосходит ли PMF не только простой bias baseline, но и настроенный классический CF;
+- показать, что rating accuracy и Top-K ranking могут давать разный порядок моделей.
 
-1. Select the latest interaction with rating at least 4.0.
-2. Break latest-timestamp ties by movie ID ascending.
-3. Keep only history with `timestamp < target_timestamp`.
-4. Require at least 20 prior interactions.
-5. Require at least 10 ranking-training interactions for the target movie.
 
-Separate frozen copies of all four models are trained on `processed/ranking_train_ratings.csv`. SVD and PMF are not retuned on ranking targets.
+## 📐 MSE и RMSE
 
-The candidate set is the full ranking-training-supported catalog minus the user's temporal-prefix history. No sampled negatives are used. The held-out target remains a candidate.
+MSE усредняет квадраты ошибок:
 
-The protocol reports:
+```text
+MSE = mean((actual - predicted)²)
+```
 
-- HitRate@5 and HitRate@10
-- NDCG@5 and NDCG@10
-- MRR@5 and MRR@10
-- mean and median target rank
+RMSE является корнем из MSE и выражен в исходной шкале рейтингов:
 
-This evaluation measures next-positive recovery under temporal leave-one-positive-out. It asks whether one known future positive is ranked highly among unseen candidates. Unknown catalog items are not observed negatives, so the protocol does not prove that every other unseen movie is irrelevant.
+```text
+RMSE = sqrt(MSE)
+```
 
-Generated ranking artifacts:
+Для обеих метрик меньшее значение означает меньшую ошибку.
 
-- `processed/ranking_train_ratings.csv`
-- `processed/ranking_targets.csv`
-- `reports/ranking_protocol.json`
-- `reports/ranking_metrics.json`
-- `reports/ranking_results.csv`
-- `reports/ranking_comparison.png`
+Финальные результаты на test split:
 
-The current protocol evaluates 5,767 eligible users. Generated ranking results:
+| Модель       | Test MSE | Test RMSE |
+|--------------|---------:|----------:|
+| PMF          | 0.712165 | 0.843899  |
+| ItemKNN      | 0.737614 | 0.858845  |
+| SVD          | 0.793518 | 0.890796  |
+| BiasBaseline | 0.824119 | 0.907810  |
 
-| Model | HitRate@5 | HitRate@10 | NDCG@5 | NDCG@10 | MRR@5 | MRR@10 | Mean rank | Median rank |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| BiasBaseline | 0.004682 | 0.013178 | 0.002093 | 0.004714 | 0.001283 | 0.002291 | 1148.59 | 934 |
-| ItemKNN | 0.002601 | 0.005375 | 0.001599 | 0.002502 | 0.001269 | 0.001645 | 1084.28 | 845 |
-| SVD | 0.019421 | 0.030692 | 0.011453 | 0.015065 | 0.008841 | 0.010313 | 1097.46 | 796 |
-| PMF | 0.014392 | 0.026704 | 0.009064 | 0.012976 | 0.007338 | 0.008912 | 975.60 | 696 |
+Требования задания выполнены:
 
-SVD has the strongest HitRate@10, NDCG@10, and MRR@10 in this run. PMF has the best mean and median target rank. These outcomes are reported independently from rating RMSE.
+```text
+SVD RMSE <= 0.90
+PMF RMSE <= 0.85
+PMF improvement over SVD >= 5%
+```
 
-### What the metric reversal means
+Фактическое улучшение PMF относительно SVD - `5.265%`.
 
-The headline is objective-dependent. PMF is #1 by test RMSE (0.844) and median target rank (696), while SVD is #1 by HitRate@10 (3.07%). ItemKNN reverses from #2 by RMSE (0.859) to #4 by HitRate@10 (0.54%); SVD reverses from #3 by RMSE (0.891) to #1 by HitRate@10 (3.07%).
+## 📏 Benchmark для RMSE
 
-PMF also has the lighter deep tail: 16.09% of its targets have rank greater than 2,000 versus 21.03% for SVD. SVD's advantage is restricted to the extreme head (HitRate@5 1.94% versus 1.44% for PMF); by p10 PMF has the lower target rank (56 versus 59) and remains better through the reported deep quantiles. The committed artifacts establish this empirical reversal, but they do not establish its causal mechanism.
+Benchmark для audit-проверки rating prediction - `BiasBaseline`.
 
-## User Case Studies
+Это стандартный регуляризованный bias-based collaborative predictor:
 
-The persisted roles remain:
+```text
+global_mean + user_bias + item_bias
+```
 
-- `train_profile_accurate`
-- `train_profile_less_accurate`
-- `test_case`
+Обе обязательные модели матричной факторизации превосходят его:
+- SVD улучшает RMSE на `1.874%`;
+- PMF улучшает RMSE на `7.040%`.
 
-Their meaning is now based on temporal ranking outcomes:
 
-- The accurate profile is a non-extreme PMF Hit@10 near the median hit rank.
-- The less-accurate profile is a PMF miss near the median miss rank.
-- The test case is a distinct user near the overall median PMF target rank.
+`ItemKNN` используется отдельно как более сильный neighborhood-CF sanity check, а не как acceptance threshold:
+- PMF лучше ItemKNN по RMSE на `1.740%`;
+- SVD хуже ItemKNN по RMSE на `3.720%`.
 
-Per-user SVD and PMF test RMSE remain secondary diagnostics. They do not determine the hit/miss labels.
+Один из возможных методологических факторов состоит в том, что truncated `svds` аппроксимирует разреженную residual-матрицу, где ненаблюдаемые residual entries представлены нулями, тогда как SGD-based PMF оптимизирует ошибку только по наблюдаемым ratings. Это возможное объяснение, а не установленный причинный механизм.
 
-Current selected cases:
+## 🏁 Top-K ranking
 
-| Role | User | Target | PMF rank | PMF Hit@10 |
-|---|---:|---|---:|---:|
-| `train_profile_accurate` | 2739 | Sixth Sense, The (1999) | 6 | true |
-| `train_profile_less_accurate` | 2505 | Santa Clause, The (1994) | 736 | false |
-| `test_case` | 2210 | Contender, The (2000) | 696 | false |
+Ranking оценивается отдельно от rating prediction.
 
-Each selected user has production recommendation explanations and a target-specific ranking case:
+Протокол:
 
-- `reports/user_<id>_recommendations.csv`
-- `reports/user_<id>_explanations.csv`
-- `reports/user_<id>_explanation.png`
-- `reports/user_<id>_ranking_case.csv`
-- `reports/user_<id>_ranking_case.png`
+```text
+temporal leave-one-positive-out
+```
 
-The ranking case reconstructs the ranking-copy PMF target score within `1e-5`, records all four target ranks and scores, and identifies the nearest highly rated movie from the strict temporal prefix.
+Для каждого подходящего пользователя:
+1. Выбирается последнее взаимодействие с rating `>= 4.0`.
+2. При одинаковом timestamp используется movie ID ascending.
+3. В ranking history остаются только строки с `timestamp < target_timestamp`.
+4. Требуется минимум `20` prior interactions.
+5. Target movie должен иметь минимум `10` interactions в ranking-training data.
+6. Candidate set содержит весь поддерживаемый каталог за вычетом strict temporal history пользователя.
+7. Sampled negatives не используются.
+8. Target остаётся в candidate set.
+9. Tie-break при одинаковом score - movie ID ascending.
 
-## Streamlit Dashboard
+SVD и PMF для ranking обучаются отдельными frozen copies. Ranking targets не используются для tuning.
 
-`app.py` reads saved artifacts only. It does not train or tune models.
+Текущий протокол оценивает `5,767` пользователей.
 
-The evaluation-profile selectbox uses an explicit key and an `on_change` callback that writes the selected user ID into `st.session_state["user_id_input"]`. The keyed manual input remains editable. Invalid text and unknown IDs produce `st.error` without a traceback.
+| Модель       | HitRate@5 | HitRate@10 | NDCG@10  | MRR@10   | Mean rank | Median rank |
+|--------------|----------:|-----------:|---------:|---------:|----------:|------------:|
+| BiasBaseline | 0.004682  | 0.013178   | 0.004714 | 0.002291 | 1148.59   | 934         |
+| ItemKNN      | 0.002601  | 0.005375   | 0.002502 | 0.001645 | 1084.28   | 845         |
+| SVD          | 0.019421  | 0.030692   | 0.015065 | 0.010313 | 1097.46   | 796         |
+| PMF          | 0.014392  | 0.026704   | 0.012976 | 0.008912 | 975.60    | 696         |
 
-The Model Evaluation tab separates:
+Unknown unseen movies не считаются observed negatives. Протокол измеряет, насколько высоко модель поднимает один известный будущий positive item.
 
-- Rating prediction: four-model MSE/RMSE and the RMSE plot.
-- Top-K next-positive recovery: HitRate@10, NDCG@10, MRR@10, protocol context, and the selected ranking case.
+## 🔄 Rating accuracy и ranking quality
 
-## Validation
+Главный результат проекта - порядок моделей зависит от целевой функции.
 
-`scripts/validate_project.py` checks:
+По RMSE:
 
-- required naming and stale identifier removal;
-- the unchanged deterministic rating split;
-- BiasBaseline and ItemKNN tuning/refit metadata;
-- honest RMSE comparison fields;
-- SVD/PMF artifacts and recommendation ordering;
-- temporal prefix, target support, full-catalog candidates, ranks, and exact rank-derived metrics;
-- ranking-based case selection and PMF target decomposition;
-- notebook execution outputs and Streamlit import.
+```text
+PMF > ItemKNN > SVD > BiasBaseline
+```
 
-Synthetic tests cover BiasBaseline, ItemKNN, ranking protocol construction, full-catalog ranking math, case selection, validator failures, and Streamlit session-state behavior.
+Здесь знак `>` означает лучшее качество, то есть меньший RMSE.
 
-## Limitations
+По HitRate@10:
 
-The models use collaborative ratings only and do not solve cold start. RMSE and ranking metrics answer different questions. The temporal protocol holds out one known future positive and does not observe true negatives. PMF latent factors are descriptive rather than proven semantic dimensions. The selected PMF factor count remains at the searched boundary.
+```text
+SVD > PMF > BiasBaseline > ItemKNN
+```
+
+Наиболее показательные изменения:
+
+```text
+ItemKNN: #2 по RMSE -> #4 по HitRate@10
+SVD:     #3 по RMSE -> #1 по HitRate@10
+```
+
+ItemKNN особенно важен для этой демонстрации: он силён при предсказании rating, но хуже остальных возвращает target в первые десять позиций.
+
+PMF:
+- лучший по rating MSE и RMSE;
+- имеет лучший mean и median target rank;
+- лучше SVD на большинстве распределения target ranks;
+- имеет более лёгкий deep tail.
+
+SVD:
+- лучший по HitRate@5 и HitRate@10;
+- сильнее в extreme head списка;
+- уступает PMF по typical rank и глубокой части распределения.
+
+Текущие артефакты фиксируют это расхождение, но не доказывают его причинный механизм.
+
+## 👤 Showcase-пользователи
+
+Сохраняются три роли:
+
+| Роль                          | User | Target                   | PMF rank | PMF Hit@10 |
+|-------------------------------|-----:|--------------------------|---------:|-----------:|
+| `train_profile_accurate`      | 2739 | Sixth Sense, The (1999)  | 6        | true       |
+| `train_profile_less_accurate` | 2505 | Santa Clause, The (1994) | 736      | false      |
+| `test_case`                   | 2210 | Contender, The (2000)    | 696      | false      |
+
+Роли определяются результатом temporal ranking, а не per-user RMSE:
+
+- `accurate` - PMF Hit@10;
+- `less_accurate` - PMF miss;
+- `test_case` - отдельный пользователь около медианного PMF target rank.
+
+`test_case` не означает cold-start пользователя. Split выполняется по interactions, поэтому пользователь 2210 присутствует в train history, а оценивается его held-out future interaction. Cold start не входит в scope проекта.
+
+Из-за различия целей per-user RMSE может выглядеть контринтуитивно:
+
+- у пользователя 2739 PMF попадает в Top-10, хотя его per-user RMSE хуже SVD;
+- у пользователя 2505 SVD имеет низкий per-user RMSE, но PMF не поднимает target в Top-10.
+
+Для каждого showcase-пользователя создаются:
+
+```text
+reports/user_<id>_recommendations.csv
+reports/user_<id>_explanations.csv
+reports/user_<id>_explanation.png
+reports/user_<id>_ranking_case.csv
+reports/user_<id>_ranking_case.png
+```
+
+Pipeline удаляет устаревшие `user_<id>_*` и сохраняет артефакты только для пользователей из `reports/evaluated_users.json`.
+
+## 🧩 Интерпретация
+
+Глобальная интерпретация PMF включает:
+
+- item factors с наибольшей дисперсией;
+- фильмы на положительном и отрицательном полюсах факторов;
+- genre profiles;
+- heatmap latent factors;
+- cosine similarity между item-factor vectors.
+
+Локальное объяснение PMF раскладывает score на:
+
+```text
+global mean
++ user bias
++ item bias
++ latent dot product
+```
+
+Latent factors и локальные decompositions являются описательными. Они не доказывают причинные предпочтения пользователя.
+
+## 🖥️ Streamlit
+
+`app.py` читает сохранённые артефакты и не обучает модели.
+
+Интерфейс показывает:
+- MSE и RMSE четырёх моделей;
+- PMF convergence;
+- SVD rank tuning;
+- Top-K ranking metrics;
+- showcase cases;
+- рекомендации и локальные explanations.
+
+Ручной ввод user ID остаётся редактируемым. Некорректный текст и неизвестный ID обрабатываются через `st.error` без traceback.
+
+## 🧪 Проверка проекта
+
+Pipeline и validator проверяют:
+- детерминированный rating split;
+- validation-only tuning и final refit;
+- согласованность MSE и RMSE;
+- обязательные SVD и PMF artifacts;
+- runtime-generated large artifacts;
+- temporal ranking protocol;
+- candidate sets и target ranks;
+- deterministic tie-breaking;
+- PMF score decomposition;
+- полный набор showcase artifacts;
+- отсутствие orphan `user_<id>_*`;
+- выполненный notebook без error outputs;
+- импорт Streamlit app.
+
+Основные команды:
+
+```bash
+python -m pytest -q
+python -m compileall models utils scripts app.py
+python -m scripts.validate_project
+bash scripts/smoke_streamlit.sh
+```
+
+## ⚠️ Ограничения
+- Модели используют только collaborative ratings.
+- Cold start не рассматривается.
+- Rating prediction и Top-K ranking отвечают на разные вопросы.
+- Temporal ranking держит один известный future positive и не содержит истинных negative labels.
+- Отсутствие interaction не означает, что фильм пользователю не нравится.
+- Latent factors интерпретируются post-hoc и не имеют гарантированного семантического значения.
+- Причины различий между RMSE и ranking требуют отдельной диагностики.
+- Выбор production model зависит от целевой функции: PMF сильнее для rating accuracy и typical rank, SVD - для extreme-head retrieval.
+
+## 🧑‍💻 Автор
+- Nazar Yestayev (@nyestaye)

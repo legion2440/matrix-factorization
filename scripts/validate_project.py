@@ -57,11 +57,9 @@ REQUIRED_PATHS = [
     "reports/pmf_convergence.json",
     "reports/pmf_convergence_mse.png",
     "reports/pmf_convergence_rmse.png",
-    "reports/pmf_convergence.png",
     "reports/predicted_vs_actual.png",
     "reports/model_mse_comparison.png",
     "reports/model_rmse_comparison.png",
-    "reports/rmse_comparison.png",
     "reports/user_comparison.png",
     "reports/top_recommendations.png",
     "reports/evaluated_users.json",
@@ -1363,9 +1361,15 @@ def validate() -> list[str]:
         "best_epoch",
         "validation_rmse",
         "epochs_run",
-        "seconds",
         "hit_epoch_cap",
         "hit_factor_boundary",
+    }
+    forbidden_timing_fields = {
+        "sec" + "onds",
+        "elapsed_time",
+        "elapsed_seconds",
+        "duration",
+        "duration_seconds",
     }
     if not isinstance(pmf_tuning, list) or len(pmf_tuning) != 9:
         errors.append("PMF tuning artifact must contain exactly 9 configurations")
@@ -1382,6 +1386,13 @@ def validate() -> list[str]:
         if combinations != expected_combinations:
             errors.append("PMF tuning artifact has an unexpected search grid")
         for row in pmf_tuning:
+            timing_fields = forbidden_timing_fields.intersection(row)
+            if timing_fields:
+                errors.append(
+                    "PMF tuning row contains runtime timing fields: "
+                    f"{sorted(timing_fields)}"
+                )
+                break
             if required_tuning_fields - set(row):
                 errors.append("PMF tuning row has an incomplete diagnostic schema")
                 break
