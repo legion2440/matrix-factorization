@@ -14,11 +14,15 @@ from models.pmf_model import PMFModel
 from models.svd_model import SVDModel
 from scripts.download_data import download_movielens
 from utils.artifacts import (
-    plot_convergence,
+    cleanup_user_artifacts,
+    plot_model_metric_comparison,
+    plot_pmf_convergence,
     plot_predicted_vs_actual,
-    plot_rmse_comparison,
+    plot_svd_rank_tuning,
     plot_top_recommendations,
     plot_user_comparison,
+    prepare_pmf_convergence_payload,
+    prepare_svd_rank_tuning,
     save_json,
 )
 from utils.data_loader import load_movielens, validate_movielens
@@ -138,6 +142,7 @@ def _tune_svd(
                 {
                     "n_factors": factors,
                     "item_bias_regularization": bias_regularization,
+                    "validation_mse": score**2,
                     "validation_rmse": score,
                 }
             )
@@ -548,6 +553,23 @@ def main() -> None:
         movie_to_index,
     )
     save_json(reports_dir / "svd_tuning.json", svd_results)
+    svd_rank_tuning = prepare_svd_rank_tuning(
+        svd_results,
+        selected_rank=int(svd_best["n_factors"]),
+        selected_item_bias_regularization=float(
+            svd_best["item_bias_regularization"]
+        ),
+    )
+    plot_svd_rank_tuning(
+        svd_rank_tuning,
+        reports_dir / "svd_rank_tuning_rmse.png",
+        metric="rmse",
+    )
+    plot_svd_rank_tuning(
+        svd_rank_tuning,
+        reports_dir / "svd_rank_tuning_mse.png",
+        metric="mse",
+    )
 
     pmf_best, pmf_results, pmf_history = _tune_pmf(
         train_arrays,
@@ -556,7 +578,28 @@ def main() -> None:
         len(movie_to_index),
     )
     save_json(reports_dir / "pmf_tuning.json", pmf_results)
-    plot_convergence(pmf_history, reports_dir / "pmf_convergence.png")
+    pmf_convergence = prepare_pmf_convergence_payload(
+        pmf_history,
+        selected_epoch=int(pmf_best["best_epoch"]),
+        patience=PMF_TUNING_PATIENCE,
+        min_delta=PMF_TUNING_MIN_DELTA,
+    )
+    save_json(reports_dir / "pmf_convergence.json", pmf_convergence)
+    plot_pmf_convergence(
+        pmf_convergence,
+        reports_dir / "pmf_convergence_rmse.png",
+        metric="rmse",
+    )
+    plot_pmf_convergence(
+        pmf_convergence,
+        reports_dir / "pmf_convergence_mse.png",
+        metric="mse",
+    )
+    plot_pmf_convergence(
+        pmf_convergence,
+        reports_dir / "pmf_convergence.png",
+        metric="rmse",
+    )
     pmf_search_diagnostics = _pmf_search_diagnostics(pmf_best)
 
     train_validation = pd.concat(
@@ -788,12 +831,32 @@ def main() -> None:
         pmf_test_predictions,
         reports_dir / "predicted_vs_actual.png",
     )
-    plot_rmse_comparison(
-        bias_rmse,
-        item_knn_rmse,
-        svd_rmse,
-        pmf_rmse,
+    model_mse = {
+        "BiasBaseline": bias_mse,
+        "ItemKNN": item_knn_mse,
+        "SVD": svd_mse,
+        "PMF": pmf_mse,
+    }
+    model_rmse = {
+        "BiasBaseline": bias_rmse,
+        "ItemKNN": item_knn_rmse,
+        "SVD": svd_rmse,
+        "PMF": pmf_rmse,
+    }
+    plot_model_metric_comparison(
+        model_mse,
+        reports_dir / "model_mse_comparison.png",
+        metric="MSE",
+    )
+    plot_model_metric_comparison(
+        model_rmse,
+        reports_dir / "model_rmse_comparison.png",
+        metric="RMSE",
+    )
+    plot_model_metric_comparison(
+        model_rmse,
         reports_dir / "rmse_comparison.png",
+        metric="RMSE",
     )
 
     model_movies = data.movies.loc[
@@ -956,6 +1019,14 @@ def main() -> None:
         ranking_results,
     )
     save_json(reports_dir / "evaluated_users.json", evaluated_users)
+    current_user_ids = {
+        int(selection["user_id"]) for selection in evaluated_users
+    }
+    removed_user_artifacts = cleanup_user_artifacts(
+        reports_dir, current_user_ids
+    )
+    for path in removed_user_artifacts:
+        print(f"Removed stale user artifact: {path.name}")
     ranking_by_user = ranking_results.set_index("user_id")
     first_comparison: pd.DataFrame | None = None
     for selection in evaluated_users:

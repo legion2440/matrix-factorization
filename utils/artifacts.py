@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,16 @@ import numpy as np
 import pandas as pd
 
 
+USER_ARTIFACT_PATTERN = re.compile(r"^user_(\d+)_.+")
+REQUIRED_USER_ARTIFACT_SUFFIXES = (
+    "recommendations.csv",
+    "explanations.csv",
+    "explanation.png",
+    "ranking_case.csv",
+    "ranking_case.png",
+)
+
+
 def save_json(path: str | Path, payload: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -19,14 +30,100 @@ def save_json(path: str | Path, payload: Any) -> None:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
 
 
-def plot_convergence(history: list[dict[str, Any]], path: str | Path) -> None:
+def cleanup_user_artifacts(
+    reports_dir: str | Path,
+    current_user_ids: set[int],
+) -> list[Path]:
+    reports_dir = Path(reports_dir)
+    removed: list[Path] = []
+    for path in sorted(reports_dir.glob("user_*")):
+        match = USER_ARTIFACT_PATTERN.match(path.name)
+        if match and int(match.group(1)) not in current_user_ids:
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
+def prepare_pmf_convergence_payload(
+    history: list[dict[str, Any]],
+    *,
+    selected_epoch: int,
+    patience: int,
+    min_delta: float,
+) -> dict[str, Any]:
+    rows = []
+    for row in history:
+        train_rmse = float(row["train_rmse"])
+        validation_rmse = float(row["validation_rmse"])
+        rows.append(
+            {
+                "epoch": int(row["epoch"]),
+                "train_rmse": train_rmse,
+                "validation_rmse": validation_rmse,
+                "train_mse": train_rmse**2,
+                "validation_mse": validation_rmse**2,
+            }
+        )
+    return {
+        "metric_source": "RMSE; MSE is computed as RMSE ** 2",
+        "selected_epoch": int(selected_epoch),
+        "early_stopping": {
+            "patience": int(patience),
+            "min_delta": float(min_delta),
+            "epochs_run": len(rows),
+            "triggered": len(rows) < 70,
+        },
+        "history": rows,
+    }
+
+
+def plot_pmf_convergence(
+    payload: dict[str, Any],
+    path: str | Path,
+    *,
+    metric: str,
+) -> None:
+    if metric not in {"rmse", "mse"}:
+        raise ValueError("metric must be 'rmse' or 'mse'")
+    history = payload["history"]
     epochs = [row["epoch"] for row in history]
-    train = [row["train_rmse"] for row in history]
-    validation = [row["validation_rmse"] for row in history]
+    train = [row[f"train_{metric}"] for row in history]
+    validation = [row[f"validation_{metric}"] for row in history]
+    selected_epoch = int(payload["selected_epoch"])
+    stopping = payload["early_stopping"]
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(epochs, train, marker="o", markersize=3, label="Train RMSE")
-    ax.plot(epochs, validation, marker="o", markersize=3, label="Validation RMSE")
-    ax.set(xlabel="Epoch", ylabel="RMSE", title="PMF convergence")
+    label = metric.upper()
+    ax.plot(epochs, train, marker="o", markersize=3, label=f"Train {label}")
+    ax.plot(
+        epochs,
+        validation,
+        marker="o",
+        markersize=3,
+        label=f"Validation {label}",
+    )
+    ax.axvline(
+        selected_epoch,
+        color="#e45756",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"Selected epoch {selected_epoch}",
+    )
+    if int(stopping["epochs_run"]) != selected_epoch:
+        ax.axvline(
+            int(stopping["epochs_run"]),
+            color="#79706e",
+            linestyle=":",
+            linewidth=1.5,
+            label=f"Stopped after epoch {stopping['epochs_run']}",
+        )
+    ax.set(
+        xlabel="Epoch",
+        ylabel=label,
+        title=(
+            f"PMF convergence ({label}; patience={stopping['patience']}, "
+            f"min_delta={stopping['min_delta']:g})"
+        ),
+    )
     ax.grid(alpha=0.25)
     ax.legend()
     fig.tight_layout()
@@ -64,24 +161,99 @@ def plot_predicted_vs_actual(
     plt.close(fig)
 
 
-def plot_rmse_comparison(
-    bias_baseline_rmse: float,
-    item_knn_rmse: float,
-    svd_rmse: float,
-    pmf_rmse: float,
+def plot_model_metric_comparison(
+    values_by_model: dict[str, float],
     path: str | Path,
+    *,
+    metric: str,
 ) -> None:
-    labels = ["Bias baseline", "Item-kNN", "SVD", "PMF"]
-    values = [bias_baseline_rmse, item_knn_rmse, svd_rmse, pmf_rmse]
+    if metric not in {"MSE", "RMSE"}:
+        raise ValueError("metric must be MSE or RMSE")
+    labels = ["BiasBaseline", "ItemKNN", "SVD", "PMF"]
+    missing = set(labels) - set(values_by_model)
+    if missing:
+        raise ValueError(f"missing model values: {sorted(missing)}")
+    values = [float(values_by_model[label]) for label in labels]
     colors = ["#4c78a8", "#72b7b2", "#f58518", "#54a24b"]
     fig, ax = plt.subplots(figsize=(8, 4.5))
     bars = ax.bar(labels, values, color=colors)
     ax.set(
-        ylabel="Test RMSE",
-        title="Model RMSE comparison",
+        ylabel=f"Test {metric}",
+        title=f"Model {metric} comparison",
         ylim=(0, max(values) * 1.2),
     )
     ax.bar_label(bars, fmt="%.4f")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
+def prepare_svd_rank_tuning(
+    results: list[dict[str, Any]],
+    *,
+    selected_rank: int,
+    selected_item_bias_regularization: float,
+) -> pd.DataFrame:
+    frame = pd.DataFrame(results)
+    required = {
+        "n_factors",
+        "item_bias_regularization",
+        "validation_rmse",
+    }
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"SVD tuning results missing columns: {sorted(missing)}")
+    selected = frame.loc[
+        np.isclose(
+            frame["item_bias_regularization"].astype(float),
+            selected_item_bias_regularization,
+            rtol=0.0,
+            atol=0.0,
+        )
+    ].copy()
+    if selected.empty:
+        raise ValueError("selected SVD item-bias regularization is absent")
+    selected["validation_mse"] = selected["validation_rmse"].astype(float) ** 2
+    selected["selected"] = selected["n_factors"].astype(int).eq(selected_rank)
+    if selected["selected"].sum() != 1:
+        raise ValueError("selected SVD rank must appear exactly once")
+    return selected.sort_values("n_factors", kind="mergesort").reset_index(
+        drop=True
+    )
+
+
+def plot_svd_rank_tuning(
+    tuning: pd.DataFrame,
+    path: str | Path,
+    *,
+    metric: str,
+) -> None:
+    if metric not in {"rmse", "mse"}:
+        raise ValueError("metric must be 'rmse' or 'mse'")
+    value_column = f"validation_{metric}"
+    selected = tuning.loc[tuning["selected"]].iloc[0]
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot(
+        tuning["n_factors"],
+        tuning[value_column],
+        marker="o",
+        color="#4c78a8",
+    )
+    ax.scatter(
+        [selected["n_factors"]],
+        [selected[value_column]],
+        color="#e45756",
+        s=80,
+        zorder=3,
+        label=f"Selected rank {int(selected['n_factors'])}",
+    )
+    ax.set(
+        xlabel="Number of latent factors / rank",
+        ylabel=f"Validation {metric.upper()}",
+        title=f"SVD rank tuning curve ({metric.upper()})",
+    )
+    ax.grid(alpha=0.25)
+    ax.legend()
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)

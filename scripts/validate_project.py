@@ -10,6 +10,11 @@ import numpy as np
 import pandas as pd
 
 from models.pmf_model import PMFModel
+from utils.artifacts import (
+    REQUIRED_USER_ARTIFACT_SUFFIXES,
+    USER_ARTIFACT_PATTERN,
+    prepare_svd_rank_tuning,
+)
 from utils.data_loader import load_movielens
 from utils.interpretability import (
     EVALUATION_USER_ROLES,
@@ -46,8 +51,16 @@ REQUIRED_PATHS = [
     "reports/ranking_comparison.png",
     "reports/svd_predictions.npy",
     "reports/svd_metadata.json",
+    "reports/svd_tuning.json",
+    "reports/svd_rank_tuning_mse.png",
+    "reports/svd_rank_tuning_rmse.png",
+    "reports/pmf_convergence.json",
+    "reports/pmf_convergence_mse.png",
+    "reports/pmf_convergence_rmse.png",
     "reports/pmf_convergence.png",
     "reports/predicted_vs_actual.png",
+    "reports/model_mse_comparison.png",
+    "reports/model_rmse_comparison.png",
     "reports/rmse_comparison.png",
     "reports/user_comparison.png",
     "reports/top_recommendations.png",
@@ -68,6 +81,8 @@ REQUIRED_PATHS = [
     "models/bias_baseline.py",
     "models/item_knn.py",
     "scripts/build_analysis_notebook.py",
+    "utils/eda.py",
+    "utils/rating_ranking_analysis.py",
 ]
 
 RECOMMENDATION_COLUMNS = {
@@ -161,6 +176,179 @@ def _is_finite_number(value: object) -> bool:
     return isinstance(value, (int, float)) and np.isfinite(float(value))
 
 
+def _validate_mse_rmse_pair(
+    mse_value: object,
+    rmse_value: object,
+    label: str,
+    *,
+    tolerance: float = 1e-10,
+) -> list[str]:
+    if not _is_finite_number(mse_value) or not _is_finite_number(rmse_value):
+        return [f"{label} MSE/RMSE values must be finite"]
+    if not np.isclose(
+        float(mse_value),
+        float(rmse_value) ** 2,
+        rtol=tolerance,
+        atol=tolerance,
+    ):
+        return [f"{label} MSE is inconsistent with RMSE ** 2"]
+    return []
+
+
+def _validate_pmf_convergence_payload(payload: object) -> list[str]:
+    if not isinstance(payload, dict):
+        return ["pmf_convergence.json must contain an object"]
+    history = payload.get("history")
+    if not isinstance(history, list) or not history:
+        return ["pmf_convergence.json must contain non-empty history"]
+    errors: list[str] = []
+    required = {
+        "epoch",
+        "train_mse",
+        "train_rmse",
+        "validation_mse",
+        "validation_rmse",
+    }
+    epochs: list[int] = []
+    for row in history:
+        if not isinstance(row, dict) or required - set(row):
+            errors.append("PMF convergence history row has an incomplete schema")
+            break
+        epochs.append(int(row["epoch"]))
+        errors.extend(
+            _validate_mse_rmse_pair(
+                row["train_mse"], row["train_rmse"], "PMF train convergence"
+            )
+        )
+        errors.extend(
+            _validate_mse_rmse_pair(
+                row["validation_mse"],
+                row["validation_rmse"],
+                "PMF validation convergence",
+            )
+        )
+    if epochs != list(range(1, len(epochs) + 1)):
+        errors.append("PMF convergence epochs must be contiguous and 1-based")
+    selected_epoch = payload.get("selected_epoch")
+    if not isinstance(selected_epoch, int) or selected_epoch not in epochs:
+        errors.append("PMF selected epoch is absent from convergence history")
+    stopping = payload.get("early_stopping")
+    if not isinstance(stopping, dict):
+        errors.append("PMF convergence early-stopping context is missing")
+    else:
+        if int(stopping.get("epochs_run", -1)) != len(history):
+            errors.append("PMF convergence epochs_run is inconsistent")
+        if int(stopping.get("patience", -1)) != 8:
+            errors.append("PMF convergence patience changed")
+        if not np.isclose(
+            float(stopping.get("min_delta", np.nan)),
+            5e-5,
+            rtol=0.0,
+            atol=0.0,
+        ):
+            errors.append("PMF convergence min_delta changed")
+    return errors
+
+
+def _validate_svd_tuning_payload(
+    payload: object,
+    selected_rank: int,
+    selected_item_bias_regularization: float,
+) -> list[str]:
+    if not isinstance(payload, list) or not payload:
+        return ["svd_tuning.json must contain a non-empty list"]
+    errors: list[str] = []
+    required = {
+        "n_factors",
+        "item_bias_regularization",
+        "validation_mse",
+        "validation_rmse",
+    }
+    for row in payload:
+        if not isinstance(row, dict) or required - set(row):
+            errors.append("SVD tuning row has an incomplete schema")
+            return errors
+        errors.extend(
+            _validate_mse_rmse_pair(
+                row["validation_mse"],
+                row["validation_rmse"],
+                "SVD tuning validation",
+            )
+        )
+    try:
+        prepared = prepare_svd_rank_tuning(
+            payload,
+            selected_rank=selected_rank,
+            selected_item_bias_regularization=selected_item_bias_regularization,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        errors.append(f"SVD rank tuning preparation failed: {exc}")
+        return errors
+    if prepared["n_factors"].astype(int).tolist() != [5, 10, 20, 40, 60]:
+        errors.append("SVD rank tuning curve has an unexpected rank grid")
+    return errors
+
+
+def _validate_user_artifact_manifest(
+    reports_dir: Path,
+    evaluated_users: object,
+) -> list[str]:
+    if not isinstance(evaluated_users, list):
+        return ["Cannot validate user artifacts without evaluated_users records"]
+    current_ids = {
+        int(row["user_id"])
+        for row in evaluated_users
+        if isinstance(row, dict) and "user_id" in row
+    }
+    errors: list[str] = []
+    artifact_ids: set[int] = set()
+    for path in reports_dir.glob("user_*"):
+        match = USER_ARTIFACT_PATTERN.match(path.name)
+        if not match:
+            continue
+        user_id = int(match.group(1))
+        artifact_ids.add(user_id)
+        if user_id not in current_ids:
+            errors.append(f"Orphan user artifact is not in evaluated_users.json: {path.name}")
+    for user_id in sorted(current_ids):
+        for suffix in REQUIRED_USER_ARTIFACT_SUFFIXES:
+            path = reports_dir / f"user_{user_id}_{suffix}"
+            if not path.exists():
+                errors.append(
+                    f"Missing required user artifact for {user_id}: {path.name}"
+                )
+            elif path.stat().st_size == 0:
+                errors.append(f"User artifact is empty: {path.name}")
+    if artifact_ids != current_ids:
+        errors.append(
+            "User artifact IDs do not match evaluated_users.json: "
+            f"artifacts={sorted(artifact_ids)}, manifest={sorted(current_ids)}"
+        )
+    return errors
+
+
+def _validate_user_item_matrix(
+    path: Path,
+    index_to_user: np.ndarray,
+    index_to_movie: np.ndarray,
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        with path.open(encoding="utf-8") as handle:
+            header = handle.readline().rstrip("\n\r").split(",")
+            first_row = handle.readline().rstrip("\n\r").split(",")
+    except OSError as exc:
+        return [f"Could not read user_item_matrix.csv: {exc}"]
+    expected_header = ["user_id", *[str(int(value)) for value in index_to_movie]]
+    if header != expected_header:
+        errors.append("user_item_matrix.csv header does not align with movie mappings")
+    if len(first_row) != len(expected_header):
+        errors.append("user_item_matrix.csv first row has the wrong width")
+    elif first_row and int(float(first_row[0])) != int(index_to_user[0]):
+        errors.append("user_item_matrix.csv first user does not align with mappings")
+    return errors
+
+
 def _validate_benchmark_metrics(metrics: dict[str, object]) -> list[str]:
     errors: list[str] = []
     required = {
@@ -202,6 +390,14 @@ def _validate_benchmark_metrics(metrics: dict[str, object]) -> list[str]:
             errors.append(f"{key} must be finite")
     if errors:
         return errors
+    for model in ("BiasBaseline", "ItemKNN", "SVD", "PMF"):
+        errors.extend(
+            _validate_mse_rmse_pair(
+                metrics[f"{model}_MSE"],
+                metrics[f"{model}_RMSE"],
+                model,
+            )
+        )
 
     comparisons = {
         "ItemKNN_beats_BiasBaseline": ("ItemKNN_RMSE", "BiasBaseline_RMSE"),
@@ -723,6 +919,10 @@ def _validate_evaluation_users_payload(
         )
     if len(set(user_ids)) != 3:
         errors.append("Evaluation profile user IDs must be unique")
+    if set(user_ids) != {2739, 2505, 2210}:
+        errors.append(
+            "Evaluation profile users must remain exactly 2739, 2505, and 2210"
+        )
 
     train_counts = train.groupby("user_id").size()
     validation_counts = validation.groupby("user_id").size()
@@ -1062,6 +1262,10 @@ def validate() -> list[str]:
     if errors:
         return errors
     errors.extend(_validate_stale_source_references(root))
+    for relative in REQUIRED_PATHS:
+        path = root / relative
+        if path.suffix == ".png" and path.stat().st_size == 0:
+            errors.append(f"Generated plot is empty: {relative}")
 
     try:
         with (root / "reports" / "model_metrics.json").open(encoding="utf-8") as handle:
@@ -1086,8 +1290,14 @@ def validate() -> list[str]:
             evaluated_users = json.load(handle)
         with (root / "reports" / "svd_metadata.json").open(encoding="utf-8") as handle:
             svd_metadata = json.load(handle)
+        with (root / "reports" / "svd_tuning.json").open(encoding="utf-8") as handle:
+            svd_tuning = json.load(handle)
         with (root / "reports" / "pmf_tuning.json").open(encoding="utf-8") as handle:
             pmf_tuning = json.load(handle)
+        with (root / "reports" / "pmf_convergence.json").open(
+            encoding="utf-8"
+        ) as handle:
+            pmf_convergence = json.load(handle)
         with (root / "reports" / "pmf_factors" / "metadata.json").open(
             encoding="utf-8"
         ) as handle:
@@ -1109,6 +1319,7 @@ def validate() -> list[str]:
     if required_metric_keys - set(metrics):
         errors.append("model_metrics.json has an incomplete schema")
     errors.extend(_validate_benchmark_metrics(metrics))
+    errors.extend(_validate_pmf_convergence_payload(pmf_convergence))
     errors.extend(_validate_bias_baseline_tuning_artifact(bias_tuning))
     errors.extend(_validate_item_knn_tuning_artifact(item_knn_tuning))
     svd_best = metrics.get("svd_best_params", {})
@@ -1117,6 +1328,16 @@ def validate() -> list[str]:
         or float(svd_best.get("item_bias_regularization", np.nan)) != 5.0
     ):
         errors.append("SVD selected parameters changed from rank 20 / bias reg 5.0")
+    else:
+        errors.extend(
+            _validate_svd_tuning_payload(
+                svd_tuning,
+                selected_rank=int(svd_best["n_factors"]),
+                selected_item_bias_regularization=float(
+                    svd_best["item_bias_regularization"]
+                ),
+            )
+        )
     pmf_best = metrics.get("pmf_best_params", {})
     expected_pmf_best = {
         "n_factors": 128,
@@ -1207,6 +1428,13 @@ def validate() -> list[str]:
     user_to_index, movie_to_index, index_to_user, index_to_movie = load_mappings(
         root / "processed" / "mappings"
     )
+    errors.extend(
+        _validate_user_item_matrix(
+            root / "processed" / "user_item_matrix.csv",
+            index_to_user,
+            index_to_movie,
+        )
+    )
     predictions = np.load(root / "reports" / "svd_predictions.npy", mmap_mode="r")
     expected_shape = (len(user_to_index), len(movie_to_index))
     errors.extend(_validate_raw_svd_predictions(predictions, expected_shape))
@@ -1244,6 +1472,12 @@ def validate() -> list[str]:
             validation,
             test,
             ranking_results,
+        )
+    )
+    errors.extend(
+        _validate_user_artifact_manifest(
+            root / "reports",
+            evaluated_users,
         )
     )
 
@@ -1418,6 +1652,26 @@ def validate() -> list[str]:
         ]
         if notebook_errors:
             errors.append("Notebook contains error outputs")
+        unexecuted = [
+            index
+            for index, cell in enumerate(notebook.cells)
+            if cell.cell_type == "code" and cell.get("execution_count") is None
+        ]
+        if unexecuted:
+            errors.append(
+                "Notebook contains unexecuted code cells: "
+                f"{unexecuted[:10]}"
+            )
+        oversized = [
+            index
+            for index, cell in enumerate(notebook.cells)
+            if cell.cell_type == "code" and len(cell.source.splitlines()) > 150
+        ]
+        if oversized:
+            errors.append(
+                "Notebook contains oversized implementation cells: "
+                f"{oversized}"
+            )
         markdown_text = "\n".join(
             cell.source
             for cell in notebook.cells
@@ -1427,6 +1681,9 @@ def validate() -> list[str]:
         required_sections = [
             "## 1. Project goal",
             "## 2. MovieLens EDA and Insights",
+            "### 2.1 Temporal EDA",
+            "### 2.2 Genre EDA",
+            "### 2.3 Demographic EDA",
             "## 3. Rating-prediction split",
             "## 4. Bias baseline",
             "## 5. Item-kNN neighborhood collaborative filtering",
@@ -1453,7 +1710,10 @@ def validate() -> list[str]:
             "Unknown catalog items are not observed negatives",
             "one known future positive",
             "No sampled negatives are used",
-            "selection now comes from actual temporal ranking outcomes",
+            "defined by temporal ranking outcome, not per-user RMSE",
+            "The full raw dataset is used only for descriptive EDA",
+            "SVD is fitted through a direct truncated decomposition",
+            "cold-start user",
         ]
         for statement in required_statements:
             if statement not in normalized_markdown:

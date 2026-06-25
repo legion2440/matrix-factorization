@@ -31,6 +31,12 @@ def load_application_resources() -> dict[str, object]:
         ROOT / "reports" / "ranking_metrics.json",
         ROOT / "reports" / "ranking_protocol.json",
         ROOT / "reports" / "evaluated_users.json",
+        ROOT / "reports" / "model_mse_comparison.png",
+        ROOT / "reports" / "model_rmse_comparison.png",
+        ROOT / "reports" / "pmf_convergence_mse.png",
+        ROOT / "reports" / "pmf_convergence_rmse.png",
+        ROOT / "reports" / "svd_rank_tuning_mse.png",
+        ROOT / "reports" / "svd_rank_tuning_rmse.png",
         ROOT / "reports" / "pmf_factor_interpretation.csv",
         ROOT / "reports" / "pmf_factor_genre_profiles.csv",
         ROOT / "reports" / "pmf_movie_similarities.csv",
@@ -173,6 +179,11 @@ def main() -> None:
         format_func=_evaluation_user_label,
         key="evaluation_profile",
         on_change=_sync_evaluation_profile_user_id,
+    )
+    st.caption(
+        "Showcase roles are defined by temporal ranking outcomes, not per-user "
+        "RMSE. These users have training history and are evaluated on held-out "
+        "interactions; cold start is outside the project scope."
     )
     manual_user_id = controls[1].text_input(
         "User ID input",
@@ -371,9 +382,13 @@ def main() -> None:
         )
         col1, col2 = st.columns(2)
         with col1:
-            _artifact_image("reports/rmse_comparison.png")
-            _artifact_image("reports/pmf_convergence.png")
+            _artifact_image("reports/model_mse_comparison.png")
+            _artifact_image("reports/pmf_convergence_mse.png")
+            _artifact_image("reports/svd_rank_tuning_mse.png")
         with col2:
+            _artifact_image("reports/model_rmse_comparison.png")
+            _artifact_image("reports/pmf_convergence_rmse.png")
+            _artifact_image("reports/svd_rank_tuning_rmse.png")
             _artifact_image("reports/predicted_vs_actual.png")
 
         st.divider()
