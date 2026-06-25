@@ -9,3 +9,7 @@ data/ml-1m.zip
 data/ml-1m/
 reports/svd_predictions.npy
 processed/user_item_matrix.csv
+
+data/ratings.dat
+data/users.dat
+data/movies.dat
